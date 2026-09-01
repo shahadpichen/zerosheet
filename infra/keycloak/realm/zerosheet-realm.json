@@ -1,0 +1,71 @@
+{
+  "realm": "${KEYCLOAK_REALM}",
+  "displayName": "ZeroSheet",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "registrationEmailAsUsername": false,
+  "rememberMe": false,
+  "verifyEmail": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "maxDeltaTimeSeconds": 43200,
+  "minimumQuickLoginWaitSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "clients": [
+    {
+      "clientId": "${KEYCLOAK_BFF_CLIENT_ID}",
+      "name": "ZeroSheet browser-facing backend",
+      "description": "Confidential OIDC client used only by the ZeroSheet API/BFF. Browser code must never receive this client's secret.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_BFF_CLIENT_SECRET}",
+      "publicClient": false,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "fullScopeAllowed": false,
+      "rootUrl": "${ZEROSHEET_API_URL}",
+      "baseUrl": "${ZEROSHEET_WEB_URL}",
+      "redirectUris": ["${ZEROSHEET_API_URL}/auth/callback"],
+      "webOrigins": ["${ZEROSHEET_WEB_URL}"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "${ZEROSHEET_WEB_URL}/*",
+        "backchannel.logout.session.required": "true",
+        "frontchannel.logout.session.required": "true",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "${KEYCLOAK_TEST_USER_USERNAME}",
+      "email": "${KEYCLOAK_TEST_USER_EMAIL}",
+      "firstName": "ZeroSheet",
+      "lastName": "Learner",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KEYCLOAK_TEST_USER_PASSWORD}",
+          "temporary": true
+        }
+      ]
+    }
+  ]
+}

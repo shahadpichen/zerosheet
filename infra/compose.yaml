@@ -1,0 +1,159 @@
+# ZeroSheet local IAM laboratory
+# ===============================
+#
+# This Compose file intentionally contains detailed comments. IAM failures are
+# often configuration failures, so understanding why a port, account, volume,
+# or health check exists is as important as understanding application code.
+#
+# The "auth-lab" profile starts Keycloak in addition to PostgreSQL. Later
+# milestones will add separate profiles for OpenFGA, OPA, and the worker. This
+# lets the 2 GB staging VPS run only the services needed for a specific lesson.
+
+name: zerosheet
+
+services:
+  postgres:
+    # PostgreSQL 17 is supported by the selected Keycloak generation and is also
+    # the datastore version used in OpenFGA's current Docker documentation.
+    image: postgres:17-alpine
+    container_name: zerosheet-postgres
+    environment:
+      # The official image creates this role as a PostgreSQL superuser. Service
+      # applications never receive this credential.
+      POSTGRES_DB: postgres
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:?POSTGRES_ADMIN_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?POSTGRES_ADMIN_PASSWORD is required}
+
+      # The initialization script receives these values and creates three
+      # least-privilege login roles. Passing values through the environment
+      # avoids embedding even local passwords in SQL committed to Git.
+      ZEROSHEET_DB_NAME: ${ZEROSHEET_DB_NAME:?ZEROSHEET_DB_NAME is required}
+      ZEROSHEET_DB_USER: ${ZEROSHEET_DB_USER:?ZEROSHEET_DB_USER is required}
+      ZEROSHEET_DB_PASSWORD: ${ZEROSHEET_DB_PASSWORD:?ZEROSHEET_DB_PASSWORD is required}
+      KEYCLOAK_DB_NAME: ${KEYCLOAK_DB_NAME:?KEYCLOAK_DB_NAME is required}
+      KEYCLOAK_DB_USER: ${KEYCLOAK_DB_USER:?KEYCLOAK_DB_USER is required}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD is required}
+      OPENFGA_DB_NAME: ${OPENFGA_DB_NAME:?OPENFGA_DB_NAME is required}
+      OPENFGA_DB_USER: ${OPENFGA_DB_USER:?OPENFGA_DB_USER is required}
+      OPENFGA_DB_PASSWORD: ${OPENFGA_DB_PASSWORD:?OPENFGA_DB_PASSWORD is required}
+    ports:
+      # Binding to 127.0.0.1 makes the database reachable from local developer
+      # tools without exposing it to other devices on the network.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5434}:5432"
+    volumes:
+      # Container replacement must not delete identity or application state.
+      # This volume is persistence, not a backup; off-site backups come later.
+      - postgres_data:/var/lib/postgresql/data
+
+      # Initialization scripts run only when postgres_data is empty. Changing
+      # this script later does not silently mutate an existing database.
+      - ./postgres/init/10-create-service-databases.sh:/docker-entrypoint-initdb.d/10-create-service-databases.sh:ro
+    healthcheck:
+      # pg_isready answers whether PostgreSQL can accept connections. Dependent
+      # services wait for this instead of guessing with a fixed sleep.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_ADMIN_USER} -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-384m}
+    security_opt:
+      # Preventing privilege escalation limits what a compromised process can
+      # gain inside the container.
+      - no-new-privileges:true
+    logging: &local-logging
+      # Rotating logs protects the RackNerd plan's small SSD from unbounded
+      # container output. These limits are also useful on a developer laptop.
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - zerosheet-internal
+
+  keycloak:
+    # An exact version makes the lab reproducible. We will move to an optimized
+    # custom image before production, but the official image is clearest while
+    # learning how Keycloak itself behaves.
+    image: quay.io/keycloak/keycloak:26.7.3
+    container_name: zerosheet-keycloak
+    profiles: ["auth-lab"]
+    command: ["start-dev", "--import-realm"]
+    environment:
+      # Keycloak is the only process receiving keycloak_app credentials.
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${KEYCLOAK_DB_NAME}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+
+      # start-dev is intentionally local-only. It enables HTTP and convenient
+      # development defaults that must never be copied to the RackNerd launch.
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+
+      # Health verifies both server initialization and, because metrics are
+      # enabled, the database connection pool.
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+
+      # Keycloak calculates its heap as percentages of the container limit.
+      # Lowering the initial percentage leaves RAM for PostgreSQL and the OS on
+      # constrained learning machines while retaining room for a small JVM.
+      JAVA_OPTS_KC_HEAP: -XX:InitialRAMPercentage=20 -XX:MaxRAMPercentage=60
+
+      # Realm imports replace these placeholders at first startup. Secrets stay
+      # in the ignored .env file rather than the version-controlled JSON.
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM}
+      KEYCLOAK_TEST_USER_USERNAME: ${KEYCLOAK_TEST_USER_USERNAME}
+      KEYCLOAK_TEST_USER_EMAIL: ${KEYCLOAK_TEST_USER_EMAIL}
+      KEYCLOAK_TEST_USER_PASSWORD: ${KEYCLOAK_TEST_USER_PASSWORD}
+      KEYCLOAK_BFF_CLIENT_ID: ${KEYCLOAK_BFF_CLIENT_ID}
+      KEYCLOAK_BFF_CLIENT_SECRET: ${KEYCLOAK_BFF_CLIENT_SECRET}
+      ZEROSHEET_API_URL: ${ZEROSHEET_API_URL}
+      ZEROSHEET_WEB_URL: ${ZEROSHEET_WEB_URL}
+    ports:
+      # Both endpoints are loopback-only. Port 8080 serves OIDC; port 9000 is
+      # management-only and exposes health/metrics for this learning lab.
+      - "127.0.0.1:${KEYCLOAK_HTTP_PORT:-8080}:8080"
+      - "127.0.0.1:${KEYCLOAK_MANAGEMENT_PORT:-9000}:9000"
+    volumes:
+      # Keycloak imports files from this directory when --import-realm is used.
+      # The file name follows Keycloak's required <realm>-realm.json convention.
+      - ./keycloak/realm/zerosheet-realm.json:/opt/keycloak/data/import/zerosheet-realm.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # The minimal Keycloak image deliberately has no curl. This is the
+      # official Bash /dev/tcp pattern for checking the readiness endpoint.
+      test:
+        - CMD-SHELL
+        - >-
+          { printf 'HEAD /health/ready HTTP/1.0\r\n\r\n' >&0;
+          grep 'HTTP/1.0 200'; } 0<>/dev/tcp/localhost/9000
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: ${KEYCLOAK_MEMORY_LIMIT:-768m}
+    security_opt:
+      - no-new-privileges:true
+    logging: *local-logging
+    networks:
+      - zerosheet-internal
+
+volumes:
+  # Docker owns the physical location. The stable logical name lets us replace
+  # containers without changing where PostgreSQL stores its data.
+  postgres_data:
+
+networks:
+  # Only services attached to this bridge can resolve internal names such as
+  # "postgres". No database or management port is exposed beyond loopback.
+  zerosheet-internal:
+    driver: bridge
