@@ -1,0 +1,4 @@
+echo "Running ZeroSheet quality gates before push..."
+pnpm lint
+pnpm typecheck
+pnpm test

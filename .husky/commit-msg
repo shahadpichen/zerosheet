@@ -1,0 +1,2 @@
+echo "Validating conventional commit message..."
+pnpm exec commitlint --edit "$1"

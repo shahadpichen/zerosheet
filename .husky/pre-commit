@@ -1,0 +1,2 @@
+echo "Formatting and linting staged files..."
+pnpm exec lint-staged

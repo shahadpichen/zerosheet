@@ -8,7 +8,7 @@ export function buildApp(): FastifyInstance {
     },
   });
 
-  app.get("/health", async () => {
+  app.get("/health", () => {
     return HealthResponseSchema.parse({
       service: "zerosheet-api",
       status: "ok",
