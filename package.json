@@ -1,0 +1,28 @@
+{
+  "name": "zerosheet",
+  "version": "0.0.0",
+  "private": true,
+  "description": "End-to-end encrypted spreadsheets with enterprise identity and access management.",
+  "packageManager": "pnpm@10.27.0",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=10 <11"
+  },
+  "scripts": {
+    "build": "pnpm --recursive --if-present build",
+    "clean": "pnpm --recursive --if-present clean",
+    "dev": "pnpm --parallel --filter @zerosheet/api --filter @zerosheet/web dev",
+    "dev:api": "pnpm --filter @zerosheet/api dev",
+    "dev:web": "pnpm --filter @zerosheet/web dev",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "pnpm --recursive --if-present test",
+    "typecheck": "pnpm --recursive --if-present typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}
