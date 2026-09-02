@@ -173,6 +173,62 @@ export const ProductErrorResponseSchema = z.object({
   message: z.string().min(1),
 });
 
+/**
+ * Google storage status never returns a Google account token or provider user
+ * profile. The browser only needs to know whether the independent Drive grant
+ * exists and whether its required narrow scopes are still recorded.
+ */
+export const GoogleStorageConnectionStatusSchema = z.discriminatedUnion(
+  "connected",
+  [
+    z.object({
+      configured: z.boolean(),
+      connected: z.literal(false),
+      requiredScopes: z.array(z.string().url()).length(2),
+    }),
+    z.object({
+      configured: z.literal(true),
+      connected: z.literal(true),
+      requiredScopes: z.array(z.string().url()).length(2),
+      grantedScopes: z.array(z.string().url()).min(2).max(16),
+      connectedAt: z.string().datetime(),
+    }),
+  ],
+);
+
+/**
+ * A forced refresh is allowed only after the browser receives 401 from Google.
+ * Keeping this as a strict body prevents arbitrary OAuth parameters from being
+ * reflected into the provider token request.
+ */
+export const GoogleStorageAccessTokenRequestSchema = z
+  .object({
+    forceRefresh: z.boolean().optional().default(false),
+  })
+  .strict();
+
+/**
+ * This short-lived bearer token is the only Google credential browser code may
+ * receive. It must remain in memory and every response carrying it is no-store.
+ * Refresh tokens and client secrets never cross the BFF boundary.
+ */
+export const GoogleStorageAccessTokenResponseSchema = z.object({
+  accessToken: z.string().min(1).max(8_192),
+  expiresAt: z.string().datetime(),
+});
+
+export const GoogleStorageErrorResponseSchema = z.object({
+  error: z.enum([
+    "not_configured",
+    "connection_required",
+    "oauth_failed",
+    "invalid_request",
+    "forbidden_origin",
+    "google_unavailable",
+  ]),
+  message: z.string().min(1),
+});
+
 export type AuthenticatedUser = z.infer<typeof AuthenticatedUserSchema>;
 export type AuthSessionResponse = z.infer<typeof AuthSessionResponseSchema>;
 export type AuthenticationErrorResponse = z.infer<
@@ -195,3 +251,12 @@ export type TeamMembershipResponse = z.infer<
 >;
 export type WorkbookShareResponse = z.infer<typeof WorkbookShareResponseSchema>;
 export type ProductErrorResponse = z.infer<typeof ProductErrorResponseSchema>;
+export type GoogleStorageConnectionStatus = z.infer<
+  typeof GoogleStorageConnectionStatusSchema
+>;
+export type GoogleStorageAccessTokenResponse = z.infer<
+  typeof GoogleStorageAccessTokenResponseSchema
+>;
+export type GoogleStorageErrorResponse = z.infer<
+  typeof GoogleStorageErrorResponseSchema
+>;

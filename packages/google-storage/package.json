@@ -1,0 +1,17 @@
+{
+  "name": "@zerosheet/google-storage",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "description": "Browser-only delegated Google Drive and Sheets storage adapter for ZeroSheet ciphertext.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  }
+}

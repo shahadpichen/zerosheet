@@ -5,6 +5,8 @@ import Fastify, {
   type FastifyServerOptions,
 } from "fastify";
 import type { RuntimeConfig } from "./config.js";
+import { registerGoogleStorageRoutes } from "./google-storage/routes.js";
+import type { GoogleStorageApplicationService } from "./google-storage/types.js";
 import { registerAuditRoutes } from "./audit/routes.js";
 import type { AuditApplicationService } from "./audit/types.js";
 import { registerAuthRoutes } from "./auth/routes.js";
@@ -22,6 +24,7 @@ export interface BuildAppOptions {
   productService: ProductApplicationService;
   lifecycleService: LifecycleApplicationService;
   auditService: AuditApplicationService;
+  googleStorageService: GoogleStorageApplicationService;
   config: RuntimeConfig;
   logger?: boolean;
 }
@@ -144,6 +147,23 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
       authentication: options.authService,
       audit: options.auditService,
       cookies: options.config.authCookies,
+    });
+    done();
+  });
+
+  /**
+   * Delegated Google storage is a separate OAuth surface from Keycloak sign-in.
+   * Its plugin owns a different transaction cookie and never receives a
+   * Keycloak token, recovery phrase, workbook key, or cell payload.
+   */
+  void app.register((googleStorageScope, _pluginOptions, done) => {
+    registerGoogleStorageRoutes(googleStorageScope, {
+      authentication: options.authService,
+      storage: options.googleStorageService,
+      cookies: options.config.authCookies,
+      transactionSeconds: options.config.googleStorage.transactionSeconds,
+      callbackUrl: options.config.googleStorage.callbackUrl,
+      webUrl: options.config.webUrl,
     });
     done();
   });

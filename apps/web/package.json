@@ -13,6 +13,7 @@
     "@vitejs/plugin-react": "^5.0.0",
     "@zerosheet/contracts": "workspace:*",
     "@zerosheet/crypto": "workspace:*",
+    "@zerosheet/google-storage": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "vite": "^7.0.0"

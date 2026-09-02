@@ -49,6 +49,11 @@ organization-user lifecycle facts, and append-only security audit events. The
 API stores only SCIM credential digests; plaintext credentials exist only in
 the administrator's creation response.
 
+Migration 005 adds delegated Google storage OAuth transactions and connections.
+Transactions are expiring and one-use; connections store only an AES-256-GCM
+refresh-token envelope and exact granted scopes. The independent encryption key
+stays outside PostgreSQL, and verification never selects credential envelopes.
+
 Milestone 3 keeps the API on the developer host and adds Google as a Keycloak-
 brokered upstream identity provider. `pnpm infra:federation:google:configure`
 creates or updates that provider for an existing realm, while
@@ -97,6 +102,12 @@ Milestone 9 adds `pnpm infra:workload-mtls:verify`. It builds the pinned Node
 worker SVID receives HTTP 200 while a chain-valid API SVID is denied with HTTP 403. Additional controls reject the wrong server SPIFFE ID, a client without an
 SVID, plaintext HTTP, and any host port mapping. Private key material remains
 in process memory and is scanned out of all captured verification output.
+
+Milestone 11 adds `pnpm infra:google-storage:verify`. It verifies the browser
+Drive/Sheets adapter, server OAuth service and route boundary, refresh-token
+protection, and live migration 005 schema without requiring a Google account or
+printing credentials. Real Google consent uses the separate storage OAuth client
+described in `docs/learning/11-google-delegated-storage.md`.
 
 The Docker agent's host PID namespace and Docker daemon socket are a deliberate
 learning-lab tradeoff. Production should prefer a platform-native node agent

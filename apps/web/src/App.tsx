@@ -1,15 +1,22 @@
 import {
   AuthSessionResponseSchema,
+  GoogleStorageConnectionStatusSchema,
   type AuthenticatedUser,
+  type GoogleStorageConnectionStatus,
 } from "@zerosheet/contracts";
 import { ENCRYPTED_CELL_PREFIX } from "@zerosheet/crypto";
 import { useEffect, useState } from "react";
+import { clearGoogleStorageAccess } from "./google-storage.js";
 
 type SessionState =
   | { status: "loading" }
   | { status: "anonymous" }
   | { status: "authenticated"; user: AuthenticatedUser }
   | { status: "unavailable" };
+
+type StorageState =
+  | { status: "idle" | "loading" | "unavailable" }
+  | { status: "ready"; connection: GoogleStorageConnectionStatus };
 
 /**
  * The browser asks only whether its opaque session is valid. It never reads a
@@ -20,6 +27,7 @@ type SessionState =
  */
 export function App() {
   const [session, setSession] = useState<SessionState>({ status: "loading" });
+  const [storage, setStorage] = useState<StorageState>({ status: "idle" });
 
   useEffect(() => {
     const cancellation = new AbortController();
@@ -54,10 +62,68 @@ export function App() {
     return () => cancellation.abort();
   }, []);
 
+  useEffect(() => {
+    if (session.status !== "authenticated") {
+      setStorage({ status: "idle" });
+      clearGoogleStorageAccess();
+      return;
+    }
+
+    const cancellation = new AbortController();
+    setStorage({ status: "loading" });
+
+    async function loadStorageConnection(): Promise<void> {
+      try {
+        const response = await fetch("/api/google/storage/status", {
+          method: "GET",
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+          signal: cancellation.signal,
+        });
+        if (!response.ok) throw new Error("storage status unavailable");
+        const connection = GoogleStorageConnectionStatusSchema.parse(
+          await response.json(),
+        );
+        setStorage({ status: "ready", connection });
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setStorage({ status: "unavailable" });
+        }
+      }
+    }
+
+    void loadStorageConnection();
+    return () => cancellation.abort();
+  }, [session.status]);
+
+  async function disconnectGoogleStorage(): Promise<void> {
+    const response = await fetch("/api/google/storage/disconnect", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) {
+      setStorage({ status: "unavailable" });
+      return;
+    }
+    clearGoogleStorageAccess();
+    setStorage({
+      status: "ready",
+      connection: {
+        configured: true,
+        connected: false,
+        requiredScopes: [
+          "https://www.googleapis.com/auth/drive.file",
+          "https://www.googleapis.com/auth/drive.appdata",
+        ],
+      },
+    });
+  }
+
   return (
     <main>
-      <p className="eyebrow">Milestone 10 · Browser cryptography</p>
-      <h1>The browser owns the plaintext boundary.</h1>
+      <p className="eyebrow">Milestone 11 · Delegated Google storage</p>
+      <h1>The browser owns storage and plaintext.</h1>
       <p className="intro">
         Protected values are encrypted in the authorized browser before Google
         or the ZeroSheet API can see them. Keycloak proves who signed in;
@@ -95,6 +161,46 @@ export function App() {
               remain independent requirements.
             </p>
 
+            <div className="storage-connection">
+              <p className="status">Independent Google storage grant</p>
+              {(storage.status === "idle" || storage.status === "loading") && (
+                <span>Checking Drive connection…</span>
+              )}
+              {storage.status === "unavailable" && (
+                <span>Drive connection status is temporarily unavailable.</span>
+              )}
+              {storage.status === "ready" && !storage.connection.configured && (
+                <span>
+                  Drive connection is disabled until its separate OAuth client
+                  is configured.
+                </span>
+              )}
+              {storage.status === "ready" &&
+                storage.connection.configured &&
+                !storage.connection.connected && (
+                  <a
+                    className="primary-action"
+                    href="/api/google/storage/connect"
+                  >
+                    Connect Google Drive
+                  </a>
+                )}
+              {storage.status === "ready" && storage.connection.connected && (
+                <>
+                  <span>
+                    Connected with narrow file and encrypted-backup access.
+                  </span>
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    onClick={() => void disconnectGoogleStorage()}
+                  >
+                    Disconnect Google Drive
+                  </button>
+                </>
+              )}
+            </div>
+
             {/* A normal form navigation follows Keycloak's logout redirect.
                 JavaScript fetch would follow it internally and hide the
                 provider logout page from the browser. */}
@@ -123,8 +229,9 @@ export function App() {
       <p className="boundary-note">
         Browser: plaintext, recovery, and Web Crypto · Protected cell marker:{" "}
         <code>{ENCRYPTED_CELL_PREFIX}</code> · Keycloak: human identity ·
-        OpenFGA + OPA: authorization · Google and PostgreSQL: ciphertext and
-        metadata only
+        OpenFGA + OPA: authorization · Google: protected-cell ciphertext,
+        unprotected values, and metadata · PostgreSQL: metadata, encrypted key
+        envelopes, and an encrypted Google refresh token
       </p>
     </main>
   );

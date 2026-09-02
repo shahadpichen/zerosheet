@@ -7,13 +7,14 @@ Browser
   -> Google / optional upstream authentication
   -> Keycloak broker / sole ZeroSheet OIDC issuer
   -> opaque HttpOnly ZeroSheet session
+  -> Google Drive and Sheets APIs / short-lived delegated storage access
   -> ZeroSheet API / BFF / PEP
       -> Keycloak / authentication
       -> OpenFGA / relationship authorization
       -> OPA / contextual authorization
       -> PostgreSQL / product and session state
       -> local SPIRE Workload API / short-lived workload identity
-      -> Google APIs / encrypted workbook storage
+      -> Google OAuth endpoints / code exchange, refresh, and revocation only
 ```
 
 ## Invariants
@@ -90,3 +91,17 @@ Browser
 37. Cell authentication prevents cross-location swapping but does not prevent
     same-coordinate rollback. Production freshness needs an authenticated
     workbook revision or manifest in a later format.
+38. Google sign-in and Google storage use separate OAuth clients, transactions,
+    scopes, tokens, and revocation lifecycles. Neither grant substitutes for
+    the other.
+39. The BFF stores only an AES-256-GCM-encrypted Google refresh token and gives
+    an authenticated exact-origin browser only a short-lived access token. The
+    browser retains it in memory and sends it only to fixed Google API origins.
+40. `drive.file` limits the adapter to app-created or explicitly selected files;
+    `drive.appdata` contains only a phrase-encrypted private-key backup. Hidden
+    app data is never treated as encryption.
+41. Google receives unprotected cell values by product design. Only cells the
+    user marks protected are guaranteed to reach Google as `zs1` ciphertext.
+42. A live API compromise may use the encrypted refresh-token authority after
+    accessing its deployment key, but that authority still cannot decrypt a
+    protected cell without the user's HPKE private key and workbook envelope.

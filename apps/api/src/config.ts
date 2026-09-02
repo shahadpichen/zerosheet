@@ -49,7 +49,28 @@ export interface AuthCookieConfig {
   secure: boolean;
   loginTransactionName: string;
   sessionName: string;
+  googleStorageTransactionName: string;
 }
+
+/**
+ * Google storage consent is not identity federation. Keeping a discriminated
+ * disabled state lets the IAM lab run without fake OAuth secrets while making
+ * every credential mandatory before the storage routes can be enabled.
+ */
+export type GoogleStorageOAuthConfig =
+  | {
+      enabled: false;
+      callbackUrl: URL;
+      transactionSeconds: number;
+    }
+  | {
+      enabled: true;
+      callbackUrl: URL;
+      transactionSeconds: number;
+      clientId: string;
+      clientSecret: string;
+      tokenEncryptionKey: Uint8Array;
+    };
 
 export interface RuntimeConfig {
   host: string;
@@ -60,6 +81,7 @@ export interface RuntimeConfig {
   oidc: OidcConfig;
   authorization: AuthorizationConfig;
   contextualAuthorization: ContextualAuthorizationConfig;
+  googleStorage: GoogleStorageOAuthConfig;
   authLifetimes: AuthLifetimeConfig;
   authCookies: AuthCookieConfig;
 }
@@ -159,18 +181,41 @@ function openFgaIdentifier(
  */
 function cookieNames(
   secure: boolean,
-): Pick<AuthCookieConfig, "loginTransactionName" | "sessionName"> {
+): Pick<
+  AuthCookieConfig,
+  "loginTransactionName" | "sessionName" | "googleStorageTransactionName"
+> {
   if (secure) {
     return {
       loginTransactionName: "__Host-zerosheet_oidc_transaction",
       sessionName: "__Host-zerosheet_session",
+      googleStorageTransactionName:
+        "__Host-zerosheet_google_storage_transaction",
     };
   }
 
   return {
     loginTransactionName: "zerosheet_oidc_transaction",
     sessionName: "zerosheet_session",
+    googleStorageTransactionName: "zerosheet_google_storage_transaction",
   };
+}
+
+function base64UrlKey(
+  environment: NodeJS.ProcessEnv,
+  name: string,
+): Uint8Array {
+  const value = required(environment, name);
+  if (!/^[A-Za-z0-9_-]{43}$/u.test(value)) {
+    throw new Error(`${name} must be unpadded base64url for exactly 32 bytes`);
+  }
+
+  const bytes = Buffer.from(value, "base64url");
+  if (bytes.byteLength !== 32 || bytes.toString("base64url") !== value) {
+    bytes.fill(0);
+    throw new Error(`${name} must be unpadded base64url for exactly 32 bytes`);
+  }
+  return new Uint8Array(bytes);
 }
 
 export function loadRuntimeConfig(
@@ -195,6 +240,19 @@ export function loadRuntimeConfig(
   const openFgaApiUrl = urlValue(environment, "OPENFGA_API_URL");
   const opaApiUrl = urlValue(environment, "OPA_API_URL");
   const names = cookieNames(secureCookies);
+  const googleStorageEnabled = booleanValue(
+    environment,
+    "GOOGLE_STORAGE_OAUTH_ENABLED",
+    false,
+  );
+  const googleStorageBase = {
+    callbackUrl: new URL("/google/storage/callback", apiUrl),
+    transactionSeconds: positiveInteger(
+      environment,
+      "GOOGLE_STORAGE_OAUTH_TRANSACTION_TTL_SECONDS",
+      600,
+    ),
+  };
 
   if (
     nodeEnvironment === "production" &&
@@ -294,6 +352,21 @@ export function loadRuntimeConfig(
         5_000,
       ),
     },
+    googleStorage: googleStorageEnabled
+      ? {
+          enabled: true,
+          ...googleStorageBase,
+          clientId: required(environment, "GOOGLE_STORAGE_OAUTH_CLIENT_ID"),
+          clientSecret: required(
+            environment,
+            "GOOGLE_STORAGE_OAUTH_CLIENT_SECRET",
+          ),
+          tokenEncryptionKey: base64UrlKey(
+            environment,
+            "GOOGLE_STORAGE_TOKEN_ENCRYPTION_KEY",
+          ),
+        }
+      : { enabled: false, ...googleStorageBase },
     authLifetimes: {
       loginTransactionSeconds: positiveInteger(
         environment,

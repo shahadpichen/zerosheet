@@ -2,9 +2,9 @@
 
 ## Scope
 
-This threat model covers the browser cryptography introduced through Milestone
-10 and the IAM controls built in earlier milestones. It will evolve as Google
-storage, the editor, and multi-user sharing are integrated.
+This threat model covers the IAM controls, browser cryptography, and delegated
+Google storage boundary introduced through Milestone 11. It will evolve as the
+editor and multi-user sharing are integrated.
 
 The goal is end-to-end confidentiality for protected workbook values: Google
 and ordinary ZeroSheet hosted services should store or transport ciphertext but
@@ -85,6 +85,26 @@ scripts, and prompt patching are required deployment controls.
 JavaScript strings cannot be reliably zeroed, and Web Crypto controls the
 internal lifetime of `CryptoKey` objects. Byte arrays are cleared on best effort
 paths, but this is not proof that runtime/OS copies vanished.
+
+### Google OAuth authority and server compromise
+
+The BFF must retain offline Google authority so it can refresh short-lived
+browser access tokens. PostgreSQL stores the refresh token only as an
+AES-256-GCM envelope bound to the immutable product-user ID; the independent
+deployment key stays outside the database. This protects a database dump alone,
+not a live service compromise.
+
+An attacker controlling the API process, or an administrator with both the
+database and deployment key, can decrypt a refresh token and operate within
+`drive.file` and `drive.appdata`. That can expose unprotected cells, ciphertext,
+file metadata, and the encrypted private-key backup, and can modify or delete
+those records. It does not yield the recovery phrase, opened HPKE private key,
+or workbook key needed to decrypt protected cells.
+
+An active same-origin XSS can steal the current browser access token even though
+it is never persisted. The short lifetime and narrow scopes reduce impact but
+do not remove it. Strict CSP, reviewed dependencies, fixed API origins, and
+rapid revocation remain required.
 
 ### Availability, deletion, and rollback
 

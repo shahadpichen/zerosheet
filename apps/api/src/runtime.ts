@@ -14,6 +14,14 @@ import { LifecycleService } from "./lifecycle/lifecycle-service.js";
 import { PostgresLifecycleRepository } from "./lifecycle/postgres-lifecycle-repository.js";
 import { PostgresProductRepository } from "./product/postgres-product-repository.js";
 import { ProductService } from "./product/product-service.js";
+import { GoogleWebServerOAuthGateway } from "./google-storage/google-oauth-gateway.js";
+import {
+  DisabledGoogleStorageService,
+  GoogleStorageService,
+} from "./google-storage/google-storage-service.js";
+import { PostgresGoogleStorageRepository } from "./google-storage/postgres-google-storage-repository.js";
+import { AesGcmGoogleRefreshTokenProtector } from "./google-storage/refresh-token-protector.js";
+import type { GoogleStorageApplicationService } from "./google-storage/types.js";
 
 /**
  * This composition root is the only place that chooses concrete adapters.
@@ -73,6 +81,27 @@ export async function createRuntimeApp() {
       auditRepository,
       authorizationService,
     );
+    let googleStorageService: GoogleStorageApplicationService =
+      new DisabledGoogleStorageService();
+
+    if (config.googleStorage.enabled) {
+      const googleStorageRepository = new PostgresGoogleStorageRepository(pool);
+      await googleStorageRepository.assertReady();
+      const refreshTokens = new AesGcmGoogleRefreshTokenProtector(
+        config.googleStorage.tokenEncryptionKey,
+      );
+
+      // The protector made its own private copy. Clear the parsed environment
+      // byte array so runtime configuration is not a second long-lived key
+      // buffer, while acknowledging the service must retain one usable copy.
+      config.googleStorage.tokenEncryptionKey.fill(0);
+      googleStorageService = new GoogleStorageService({
+        repository: googleStorageRepository,
+        oauth: new GoogleWebServerOAuthGateway(config.googleStorage),
+        refreshTokens,
+        transactionSeconds: config.googleStorage.transactionSeconds,
+      });
+    }
 
     /**
      * A previous process may have stopped after PostgreSQL stored a mutation or
@@ -94,6 +123,7 @@ export async function createRuntimeApp() {
       productService,
       lifecycleService,
       auditService,
+      googleStorageService,
       config,
     });
 

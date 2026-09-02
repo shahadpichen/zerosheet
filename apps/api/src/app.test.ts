@@ -8,6 +8,7 @@ import type {
 import { buildApp } from "./app.js";
 import type { RuntimeConfig } from "./config.js";
 import type { AuditApplicationService } from "./audit/types.js";
+import type { GoogleStorageApplicationService } from "./google-storage/types.js";
 import type {
   AuthorizationApplicationService,
   CheckWorkbookPermissionInput,
@@ -308,6 +309,71 @@ class FakeAuditService implements AuditApplicationService {
   }
 }
 
+/**
+ * Google Drive consent is independent from product authentication, so the HTTP
+ * test composition gets a separate fake. Recording arguments proves routes
+ * pass the authenticated product user and the HttpOnly transaction selector
+ * into the application service without exposing either value in a response.
+ */
+class FakeGoogleStorageService implements GoogleStorageApplicationService {
+  public configured = true;
+  public connected = false;
+  public completedInput:
+    | {
+        readonly userId: string;
+        readonly callbackUrl: URL;
+        readonly transactionToken: string | undefined;
+      }
+    | undefined;
+  public tokenInput:
+    { readonly userId: string; readonly forceRefresh: boolean } | undefined;
+  public disconnectedUserId: string | undefined;
+
+  public status() {
+    return Promise.resolve({
+      configured: this.configured,
+      connected: false as const,
+      requiredScopes: [
+        "https://www.googleapis.com/auth/drive.file",
+        "https://www.googleapis.com/auth/drive.appdata",
+      ],
+    });
+  }
+
+  public beginConnection() {
+    return Promise.resolve({
+      authorizationUrl: new URL(
+        "https://accounts.google.com/o/oauth2/v2/auth?state=provider-state",
+      ),
+      transactionToken: "google-storage-transaction-token",
+    });
+  }
+
+  public completeConnection(input: {
+    readonly userId: string;
+    readonly callbackUrl: URL;
+    readonly transactionToken: string | undefined;
+  }) {
+    this.completedInput = input;
+    this.connected = true;
+    return Promise.resolve();
+  }
+
+  public accessToken(userId: string, forceRefresh: boolean) {
+    this.tokenInput = { userId, forceRefresh };
+    return Promise.resolve({
+      accessToken: "short-lived-google-access-token",
+      expiresAt: "2026-09-03T02:00:00.000Z",
+    });
+  }
+
+  public disconnect(userId: string) {
+    this.disconnectedUserId = userId;
+    this.connected = false;
+    return Promise.resolve();
+  }
+}
+
 function testConfig(): RuntimeConfig {
   return {
     host: "127.0.0.1",
@@ -342,6 +408,11 @@ function testConfig(): RuntimeConfig {
       allowInsecureHttp: true,
       requestTimeoutMs: 5_000,
     },
+    googleStorage: {
+      enabled: false,
+      callbackUrl: new URL("http://127.0.0.1:3001/google/storage/callback"),
+      transactionSeconds: 600,
+    },
     authLifetimes: {
       loginTransactionSeconds: 600,
       sessionSeconds: 28_800,
@@ -350,6 +421,7 @@ function testConfig(): RuntimeConfig {
       secure: false,
       loginTransactionName: "zerosheet_oidc_transaction",
       sessionName: "zerosheet_session",
+      googleStorageTransactionName: "zerosheet_google_storage_transaction",
     },
   };
 }
@@ -360,6 +432,7 @@ function makeApp(
   productService = new FakeProductService(),
   lifecycleService = new FakeLifecycleService(),
   auditService = new FakeAuditService(),
+  googleStorageService = new FakeGoogleStorageService(),
 ) {
   return {
     app: buildApp({
@@ -368,6 +441,7 @@ function makeApp(
       productService,
       lifecycleService,
       auditService,
+      googleStorageService,
       config: testConfig(),
       logger: false,
     }),
@@ -376,6 +450,7 @@ function makeApp(
     productService,
     lifecycleService,
     auditService,
+    googleStorageService,
   };
 }
 
@@ -851,5 +926,121 @@ describe("ZeroSheet SCIM lifecycle boundary", () => {
     expect(response.statusCode).toBe(400);
     expect(response.json<{ scimType: string }>().scimType).toBe("invalidValue");
     expect(lifecycle.replaceInput).toBeUndefined();
+  });
+});
+
+describe("ZeroSheet delegated Google storage boundary", () => {
+  it("requires the product session before revealing connection status", async () => {
+    const { app } = makeApp();
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/google/storage/status",
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({ authenticated: false });
+    expect(response.headers["cache-control"]).toBe("no-store");
+  });
+
+  it("starts separate Google consent with its own HttpOnly transaction cookie", async () => {
+    const setup = makeApp();
+    setup.service.user = testUser;
+    apps.push(setup.app);
+
+    const response = await setup.app.inject({
+      method: "GET",
+      url: "/google/storage/connect",
+      cookies: { zerosheet_session: "opaque-browser-session" },
+    });
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toContain("accounts.google.com");
+    expect(response.headers["set-cookie"]).toContain(
+      "zerosheet_google_storage_transaction=google-storage-transaction-token",
+    );
+    expect(response.headers["set-cookie"]).toContain("HttpOnly");
+    expect(response.headers["set-cookie"]).toContain("SameSite=Lax");
+    expect(response.headers["set-cookie"]).toContain("Max-Age=600");
+  });
+
+  it("binds the callback to the signed-in user and configured redirect URL", async () => {
+    const setup = makeApp();
+    setup.service.user = testUser;
+    apps.push(setup.app);
+
+    const response = await setup.app.inject({
+      method: "GET",
+      url: "/google/storage/callback?code=provider-code&state=provider-state",
+      cookies: {
+        zerosheet_session: "opaque-browser-session",
+        zerosheet_google_storage_transaction:
+          "google-storage-transaction-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(303);
+    expect(response.headers.location).toBe("http://127.0.0.1:5173/");
+    expect(response.headers["set-cookie"]).toContain(
+      "zerosheet_google_storage_transaction=;",
+    );
+    expect(setup.googleStorageService.completedInput?.userId).toBe(testUser.id);
+    expect(setup.googleStorageService.completedInput?.callbackUrl.href).toBe(
+      "http://127.0.0.1:3001/google/storage/callback?code=provider-code&state=provider-state",
+    );
+    expect(setup.googleStorageService.completedInput?.transactionToken).toBe(
+      "google-storage-transaction-token",
+    );
+  });
+
+  it("returns short-lived access only to an exact same-origin POST", async () => {
+    const setup = makeApp();
+    setup.service.user = testUser;
+    apps.push(setup.app);
+
+    const rejected = await setup.app.inject({
+      method: "POST",
+      url: "/google/storage/access-token",
+      cookies: { zerosheet_session: "opaque-browser-session" },
+      payload: { forceRefresh: false },
+    });
+    expect(rejected.statusCode).toBe(403);
+    expect(rejected.json()).toMatchObject({ error: "forbidden_origin" });
+
+    const accepted = await setup.app.inject({
+      method: "POST",
+      url: "/google/storage/access-token",
+      headers: { origin: "http://127.0.0.1:5173" },
+      cookies: { zerosheet_session: "opaque-browser-session" },
+      payload: { forceRefresh: true },
+    });
+
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.headers["cache-control"]).toBe("no-store");
+    expect(accepted.json()).toEqual({
+      accessToken: "short-lived-google-access-token",
+      expiresAt: "2026-09-03T02:00:00.000Z",
+    });
+    expect(setup.googleStorageService.tokenInput).toEqual({
+      userId: testUser.id,
+      forceRefresh: true,
+    });
+  });
+
+  it("disconnects only through an authenticated exact-origin POST", async () => {
+    const setup = makeApp();
+    setup.service.user = testUser;
+    apps.push(setup.app);
+
+    const response = await setup.app.inject({
+      method: "POST",
+      url: "/google/storage/disconnect",
+      headers: { origin: "http://127.0.0.1:5173" },
+      cookies: { zerosheet_session: "opaque-browser-session" },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(setup.googleStorageService.disconnectedUserId).toBe(testUser.id);
   });
 });

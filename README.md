@@ -13,10 +13,10 @@ The product will combine:
 
 ## Current milestone
 
-Milestone 10 adds the storage-independent browser cryptography core. A
-checksummed 12-word phrase protects the user's HPKE private-key backup, random
-workbook keys encrypt selected cells with AES-256-GCM, and each encrypted cell
-is authenticated against its exact workbook, tab, coordinate, and key version.
+Milestone 11 adds delegated Google Drive and Sheets storage. Google sign-in and
+storage consent remain separate, the BFF encrypts the offline refresh token,
+the browser keeps short-lived access only in memory, and a fixed-origin adapter
+writes protected-cell ciphertext directly to Google.
 
 ## Repository layout
 
@@ -28,6 +28,7 @@ apps/
 packages/
   contracts/          Shared runtime-validated API contracts
   crypto/             Browser recovery, HPKE, workbook keys, and encrypted cells
+  google-storage/     Fixed-origin browser Drive and Sheets adapter
   workload-identity/  SPIFFE Workload API and exact peer checks
 docs/
   architecture/       System boundaries and decisions
@@ -59,6 +60,7 @@ pnpm infra:workload-identity:provision
 pnpm infra:workload-identity:verify
 pnpm infra:workload-mtls:verify
 pnpm crypto:benchmark:cells
+pnpm infra:google-storage:verify
 pnpm typecheck
 pnpm test
 pnpm dev
@@ -101,6 +103,11 @@ The phrase/private-key boundary, HPKE recipient envelopes, workbook key
 hierarchy, authenticated per-cell format, benchmark, and important residual
 risks are explained in
 [`docs/learning/10-browser-cryptography-recovery.md`](docs/learning/10-browser-cryptography-recovery.md).
+
+The separate Google storage consent flow, narrow scopes, encrypted refresh-token
+boundary, direct browser adapter, appData backup, and manual Cloud setup are
+explained in
+[`docs/learning/11-google-delegated-storage.md`](docs/learning/11-google-delegated-storage.md).
 
 The persistent cell contract and security analysis live in
 [`docs/specifications/encrypted-cell-v1.md`](docs/specifications/encrypted-cell-v1.md)

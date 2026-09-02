@@ -36,6 +36,12 @@ describe("loadRuntimeConfig", () => {
       secure: false,
       loginTransactionName: "zerosheet_oidc_transaction",
       sessionName: "zerosheet_session",
+      googleStorageTransactionName: "zerosheet_google_storage_transaction",
+    });
+    expect(config.googleStorage).toEqual({
+      enabled: false,
+      callbackUrl: new URL("http://127.0.0.1:3001/google/storage/callback"),
+      transactionSeconds: 600,
     });
     expect(config.authorization).toMatchObject({
       apiUrl: new URL("http://127.0.0.1:8082"),
@@ -115,5 +121,46 @@ describe("loadRuntimeConfig", () => {
         OPENFGA_AUTHORIZATION_MODEL_ID: "replace-me",
       }),
     ).toThrow(/infra:authorization:provision/u);
+  });
+
+  it("requires independent storage OAuth secrets only when enabled", () => {
+    expect(() =>
+      loadRuntimeConfig({
+        ...validEnvironment(),
+        GOOGLE_STORAGE_OAUTH_ENABLED: "true",
+      }),
+    ).toThrow(/GOOGLE_STORAGE_OAUTH_CLIENT_ID/u);
+
+    const config = loadRuntimeConfig({
+      ...validEnvironment(),
+      GOOGLE_STORAGE_OAUTH_ENABLED: "true",
+      GOOGLE_STORAGE_OAUTH_CLIENT_ID:
+        "storage-client.apps.googleusercontent.com",
+      GOOGLE_STORAGE_OAUTH_CLIENT_SECRET: "test-only-google-secret",
+      GOOGLE_STORAGE_TOKEN_ENCRYPTION_KEY:
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    });
+    expect(config.googleStorage).toMatchObject({
+      enabled: true,
+      clientId: "storage-client.apps.googleusercontent.com",
+    });
+    expect(
+      config.googleStorage.enabled
+        ? config.googleStorage.tokenEncryptionKey.byteLength
+        : 0,
+    ).toBe(32);
+  });
+
+  it("rejects a malformed Google refresh-token encryption key", () => {
+    expect(() =>
+      loadRuntimeConfig({
+        ...validEnvironment(),
+        GOOGLE_STORAGE_OAUTH_ENABLED: "true",
+        GOOGLE_STORAGE_OAUTH_CLIENT_ID:
+          "storage-client.apps.googleusercontent.com",
+        GOOGLE_STORAGE_OAUTH_CLIENT_SECRET: "test-only-google-secret",
+        GOOGLE_STORAGE_TOKEN_ENCRYPTION_KEY: "too-short",
+      }),
+    ).toThrow(/exactly 32 bytes/u);
   });
 });
