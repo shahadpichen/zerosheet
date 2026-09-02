@@ -33,6 +33,7 @@
     "infra:contextual-authorization:verify": "bash infra/scripts/verify-contextual-authorization.sh",
     "infra:lifecycle:verify": "bash infra/scripts/verify-enterprise-lifecycle.sh",
     "infra:google-storage:verify": "bash infra/scripts/verify-google-storage-foundation.sh",
+    "infra:sheet-editor:verify": "bash infra/scripts/verify-encrypted-sheet-editor.sh",
     "infra:product:verify": "bash infra/scripts/verify-product-authorization-lifecycle.sh",
     "infra:oidc:verify": "bash infra/scripts/verify-oidc-bff.sh",
     "infra:workload-identity:config": "docker compose --env-file .env --file infra/compose.yaml --profile workload-identity-lab --profile workload-identity-probes config --quiet",
@@ -45,6 +46,7 @@
     "infra:workload-mtls:logs": "docker compose --env-file .env --file infra/compose.yaml --profile workload-identity-lab --profile workload-mtls-lab logs --follow mtls-api",
     "infra:workload-mtls:verify": "bash infra/scripts/verify-workload-mtls.sh",
     "crypto:benchmark:cells": "pnpm --filter @zerosheet/crypto build && pnpm --filter @zerosheet/crypto benchmark:cells",
+    "sheet:benchmark:sync": "pnpm --filter @zerosheet/sheet-core benchmark:sheet",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
     "prepare": "node .husky/install.mjs",
@@ -61,6 +63,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^17.4.1",
     "prettier": "^3.0.0",
+    "tsx": "4.23.13",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.69.0",
     "vitest": "^3.2.0"

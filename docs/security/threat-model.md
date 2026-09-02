@@ -2,9 +2,9 @@
 
 ## Scope
 
-This threat model covers the IAM controls, browser cryptography, and delegated
-Google storage boundary introduced through Milestone 11. It will evolve as the
-editor and multi-user sharing are integrated.
+This threat model covers the IAM controls, browser cryptography, delegated
+Google storage boundary, and local selective-protection editor introduced
+through Milestone 12. It will evolve as multi-user sharing is integrated.
 
 The goal is end-to-end confidentiality for protected workbook values: Google
 and ordinary ZeroSheet hosted services should store or transport ciphertext but
@@ -31,6 +31,8 @@ identifiers/verification material, not secrets.
   ZeroSheet JavaScript;
 - browser Web Crypto and its random-number generator;
 - reviewed `@zerosheet/crypto`, pinned Capsule, and pinned HPKE code;
+- the pinned Apache-2.0 Univer editor build and the reviewed ZeroSheet adapter
+  that translates between editor values and the encrypted storage format;
 - Keycloak for human authentication, not decryption;
 - OpenFGA and OPA for authorization decisions, not key possession;
 - SPIRE for workload identity, not workbook access; and
@@ -166,6 +168,25 @@ caches, crash reports, screenshots, unsafe formula functions, and local
 extensions can leak that plaintext. The editor must avoid network-capable or
 dynamic-code formula functions unless they are explicitly sandboxed and
 reviewed.
+
+Univer is part of the trusted frontend while a workbook is open. ZeroSheet does
+not give the engine a Google access token, recovery phrase, extractable workbook
+key, or direct storage adapter. No third-party networking or Pro collaboration
+plugin is enabled in this milestone. This separation reduces accidental token
+leakage, but it cannot protect plaintext from a compromised editor dependency or
+malicious frontend release.
+
+Unprotected cells are intentionally ordinary Google values. The protection map
+is coordinate-based, and a protected blank is encrypted so its marker survives
+Google omitting trailing blanks. Anyone with Google access can still infer which
+coordinates contain encrypted markers and approximate protected value lengths.
+
+The sync session reads the Drive file version before and after a batch read and
+checks it again before each serialized write. This detects ordinary concurrent
+edits, but Drive's version check and the Sheets values write are separate API
+calls. A remote edit in that narrow interval can still be overwritten. A future
+authenticated workbook revision and merge flow are required before claiming
+strong concurrent-edit protection.
 
 ## Key hierarchy
 

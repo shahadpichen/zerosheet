@@ -1,0 +1,22 @@
+{
+  "name": "@zerosheet/sheet-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "description": "Storage-independent selective protection and Google Sheet synchronization core for ZeroSheet.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "benchmark:sheet": "tsx src/benchmark.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@zerosheet/crypto": "workspace:*",
+    "@zerosheet/google-storage": "workspace:*"
+  }
+}

@@ -5,8 +5,13 @@ import {
   type GoogleStorageConnectionStatus,
 } from "@zerosheet/contracts";
 import { ENCRYPTED_CELL_PREFIX } from "@zerosheet/crypto";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { clearGoogleStorageAccess } from "./google-storage.js";
+
+const EncryptedSheetEditor = lazy(async () => {
+  const module = await import("./EncryptedSheetEditor.js");
+  return { default: module.EncryptedSheetEditor };
+});
 
 type SessionState =
   | { status: "loading" }
@@ -122,8 +127,8 @@ export function App() {
 
   return (
     <main>
-      <p className="eyebrow">Milestone 11 · Delegated Google storage</p>
-      <h1>The browser owns storage and plaintext.</h1>
+      <p className="eyebrow">Milestone 12 · Selective encrypted editor</p>
+      <h1>The browser owns editing and plaintext.</h1>
       <p className="intro">
         Protected values are encrypted in the authorized browser before Google
         or the ZeroSheet API can see them. Keycloak proves who signed in;
@@ -225,6 +230,18 @@ export function App() {
           </>
         )}
       </section>
+
+      {session.status === "authenticated" && (
+        <Suspense
+          fallback={
+            <section className="editor-card" aria-live="polite">
+              Loading the local spreadsheet engine…
+            </section>
+          }
+        >
+          <EncryptedSheetEditor />
+        </Suspense>
+      )}
 
       <p className="boundary-note">
         Browser: plaintext, recovery, and Web Crypto · Protected cell marker:{" "}

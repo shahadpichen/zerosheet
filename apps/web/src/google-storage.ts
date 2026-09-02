@@ -8,6 +8,10 @@ import {
   GoogleWorkspaceStorage,
   MemoryGoogleAccessTokenProvider,
 } from "@zerosheet/google-storage";
+import {
+  EncryptedSheetSyncSession,
+  type SheetCipherContext,
+} from "@zerosheet/sheet-core";
 
 /**
  * The adapter requests a short-lived access token from the same-origin BFF.
@@ -59,4 +63,21 @@ export const googleWorkspaceStorage = new GoogleWorkspaceStorage(
 /** Clear any short-lived token retained in this page after logout/disconnect. */
 export function clearGoogleStorageAccess(): void {
   accessTokens.clear();
+}
+
+/**
+ * Compose the real Google adapter with the independently tested encrypted sync
+ * session. The caller must supply a recovered non-extractable workbook key and
+ * stable Google tab identity; this helper never manufactures an unrecoverable
+ * key merely to make a storage write possible.
+ */
+export function createGoogleSheetSyncSession(input: {
+  readonly spreadsheetId: string;
+  readonly context: SheetCipherContext;
+}): EncryptedSheetSyncSession {
+  return new EncryptedSheetSyncSession({
+    storage: googleWorkspaceStorage,
+    spreadsheetId: input.spreadsheetId,
+    context: input.context,
+  });
 }

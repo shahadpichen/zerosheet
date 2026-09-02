@@ -105,3 +105,16 @@ Browser
 42. A live API compromise may use the encrypted refresh-token authority after
     accessing its deployment key, but that authority still cannot decrypt a
     protected cell without the user's HPKE private key and workbook envelope.
+43. Univer is a local spreadsheet UI/engine. It receives plaintext only after
+    browser-side decryption and receives no Google access token, recovery
+    phrase, raw workbook-key bytes, or server-side encryption secret.
+44. Selection protection is coordinate-exact. Unprotected values intentionally
+    remain visible to Google, while protected blank cells still receive a `zs1`
+    marker so their protection decision survives a reload.
+45. A Google values write is one bounded `RAW` batch of at most 10,000 cells.
+    ZeroSheet verifies the Drive file version before a write and serializes
+    local saves, but Google provides no atomic version compare-and-swap for the
+    Sheets values API, so a narrow check/write race remains.
+46. The Milestone 12 preview key is temporary and never uploads data. A real
+    workbook save must wait until an HPKE envelope for the creator's public key
+    has been durably stored, preventing ciphertext from outliving its only key.

@@ -13,10 +13,12 @@ The product will combine:
 
 ## Current milestone
 
-Milestone 11 adds delegated Google Drive and Sheets storage. Google sign-in and
-storage consent remain separate, the BFF encrypts the offline refresh token,
-the browser keeps short-lived access only in memory, and a fixed-origin adapter
-writes protected-cell ciphertext directly to Google.
+Milestone 12 adds the local Univer spreadsheet editor and a storage-independent
+selective-protection core. A drag selection or whole columns can be protected,
+one 100 × 100 batch can be encrypted/decrypted in the browser, and queued saves
+retain immutable snapshots while detecting ordinary Google Drive conflicts.
+The editor preview deliberately does not upload its temporary key; Milestone 13
+will persist the creator's HPKE envelope before real autosave is enabled.
 
 ## Repository layout
 
@@ -29,6 +31,7 @@ packages/
   contracts/          Shared runtime-validated API contracts
   crypto/             Browser recovery, HPKE, workbook keys, and encrypted cells
   google-storage/     Fixed-origin browser Drive and Sheets adapter
+  sheet-core/         Selective protection, cell codec, and safe sync sessions
   workload-identity/  SPIFFE Workload API and exact peer checks
 docs/
   architecture/       System boundaries and decisions
@@ -61,6 +64,7 @@ pnpm infra:workload-identity:verify
 pnpm infra:workload-mtls:verify
 pnpm crypto:benchmark:cells
 pnpm infra:google-storage:verify
+pnpm sheet:benchmark:sync
 pnpm typecheck
 pnpm test
 pnpm dev
@@ -108,6 +112,10 @@ The separate Google storage consent flow, narrow scopes, encrypted refresh-token
 boundary, direct browser adapter, appData backup, and manual Cloud setup are
 explained in
 [`docs/learning/11-google-delegated-storage.md`](docs/learning/11-google-delegated-storage.md).
+
+The Univer editor boundary, drag/column protection, 10,000-cell codec,
+immutable autosave queue, and Google conflict limitations are explained in
+[`docs/learning/12-encrypted-spreadsheet-editor.md`](docs/learning/12-encrypted-spreadsheet-editor.md).
 
 The persistent cell contract and security analysis live in
 [`docs/specifications/encrypted-cell-v1.md`](docs/specifications/encrypted-cell-v1.md)
