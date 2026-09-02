@@ -25,4 +25,7 @@ Authentication proves who is making a request. Authorization decides what that p
   evidence that is exported only after a composed administration decision.
 - API and worker processes receive separate, selector-bound, short-lived
   X.509-SVIDs from a local SPIRE agent instead of sharing a workload password.
+- Private API-to-worker calls use those SVIDs for TLS 1.3 mutual authentication
+  and exact URI-SAN authorization. Trust-domain membership alone does not grant
+  access to a workload endpoint.
 - The deployment has more services, so local labs and the 2 GB staging VPS use Compose profiles.

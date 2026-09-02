@@ -6,6 +6,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
+    "mtls:probe": "node dist/mtls-client.js",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@zerosheet/workload-identity": "workspace:*"
   }
 }

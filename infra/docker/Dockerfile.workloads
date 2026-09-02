@@ -1,0 +1,39 @@
+# Pin the exact Node 24 patch used by the repository while building this
+# milestone. Controlled patch upgrades remain explicit and reviewable.
+FROM node:24.20.0-bookworm-slim AS builder
+
+# Corepack selects the pnpm version committed in package.json instead of using
+# whichever package manager happens to be installed on a build host.
+ENV PNPM_HOME=/pnpm
+ENV PATH=${PNPM_HOME}:${PATH}
+RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
+
+WORKDIR /workspace
+
+# The build context excludes every .env file, generated identity material, and
+# host dependency tree. Only reviewed source and the lockfile enter the image.
+COPY . .
+
+# Frozen installation makes the image fail when package manifests and the
+# reviewed lockfile disagree. Build emits JavaScript before the runtime stage.
+RUN pnpm install --frozen-lockfile
+RUN pnpm build
+
+FROM node:24.20.0-bookworm-slim AS runtime
+
+ENV NODE_ENV=production
+WORKDIR /app
+
+# This learning image keeps the full installed workspace so pnpm's workspace
+# symlinks resolve correctly. A later deployment milestone can use pnpm deploy
+# to minimize separate API and worker images after their runtime shapes settle.
+COPY --from=builder --chown=node:node /workspace /app
+
+# Workloads do not need root. Compose additionally removes Linux capabilities,
+# blocks privilege escalation, and makes the root filesystem read-only.
+USER node
+
+# A safe default prevents accidentally starting the public API in a container
+# intended for the private workload-identity network. Compose overrides this
+# command for one-shot worker probes.
+CMD ["node", "apps/api/dist/internal-workload-server.js"]

@@ -5,9 +5,10 @@
 # often configuration failures, so understanding why a port, account, volume,
 # or health check exists is as important as understanding application code.
 #
-# Profiles add Keycloak, OpenFGA, and OPA to the shared PostgreSQL foundation.
-# Keeping them explicit lets the 2 GB staging VPS run only the services needed
-# for a lesson while the combined authorization command starts both PDPs.
+# Profiles add Keycloak, OpenFGA, OPA, SPIRE, and private mTLS workloads to the
+# shared foundation. Keeping them explicit lets the 2 GB staging VPS run only
+# the services needed for a lesson while combined commands select related
+# components together.
 
 name: zerosheet
 
@@ -416,6 +417,174 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+
+  mtls-api:
+    # This private listener is the first application process that consumes its
+    # rotating X.509-SVID. No host port is published: only peers on the private
+    # Compose bridge can reach the service, and TLS still authenticates them.
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.workloads
+    image: zerosheet-workloads:milestone-9
+    container_name: zerosheet-mtls-api
+    profiles: ["workload-mtls-lab"]
+    command: ["node", "apps/api/dist/internal-workload-server.js"]
+    environment:
+      SPIFFE_ENDPOINT_SOCKET: unix:///run/spire/agent/public/api.sock
+      ZEROSHEET_WORKLOAD_SPIFFE_ID: spiffe://zerosheet.internal/workload/api
+      ZEROSHEET_ALLOWED_WORKER_SPIFFE_ID: spiffe://zerosheet.internal/workload/worker
+      ZEROSHEET_INTERNAL_MTLS_HOST: 0.0.0.0
+      ZEROSHEET_INTERNAL_MTLS_PORT: "3443"
+      ZEROSHEET_INTERNAL_READY_FILE: /tmp/zerosheet-internal-mtls-ready
+    labels:
+      org.zerosheet.workload: api
+    volumes:
+      # The application sees only the workload-facing socket. It receives no
+      # SPIRE management socket, server datastore, registration API, or static
+      # certificate file.
+      - spire_agent_socket:/run/spire/agent/public:ro
+    expose:
+      - "3443"
+    depends_on:
+      spire-agent:
+        condition: service_healthy
+    healthcheck:
+      # The process writes this non-secret marker only after it has obtained a
+      # valid SVID and bound the TLS listener. /tmp is a small isolated tmpfs.
+      test: ["CMD", "test", "-f", "/tmp/zerosheet-internal-mtls-ready"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 5s
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 15s
+    mem_limit: ${ZEROSHEET_WORKLOAD_MEMORY_LIMIT:-192m}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging: *local-logging
+    networks:
+      - zerosheet-internal
+
+  mtls-worker-probe:
+    # The registered worker obtains its own SVID and is the only identity the
+    # reconciliation endpoint allowlists after mutual TLS succeeds.
+    image: zerosheet-workloads:milestone-9
+    profiles: ["workload-mtls-probes"]
+    command: ["node", "apps/worker/dist/mtls-client.js"]
+    environment: &worker-mtls-environment
+      SPIFFE_ENDPOINT_SOCKET: unix:///run/spire/agent/public/api.sock
+      ZEROSHEET_INTERNAL_MTLS_SERVER: mtls-api
+      ZEROSHEET_INTERNAL_MTLS_PORT: "3443"
+      ZEROSHEET_WORKLOAD_SPIFFE_ID: spiffe://zerosheet.internal/workload/worker
+      ZEROSHEET_EXPECTED_API_SPIFFE_ID: spiffe://zerosheet.internal/workload/api
+      ZEROSHEET_EXPECTED_HTTP_STATUS: "200"
+    labels:
+      org.zerosheet.workload: worker
+    volumes:
+      - spire_agent_socket:/run/spire/agent/public:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - zerosheet-internal
+
+  mtls-api-caller-probe:
+    # This negative control has a valid API SVID from the same trust domain.
+    # TLS accepts it, but endpoint authorization must still return HTTP 403.
+    image: zerosheet-workloads:milestone-9
+    profiles: ["workload-mtls-probes"]
+    command: ["node", "apps/worker/dist/mtls-client.js"]
+    environment:
+      <<: *worker-mtls-environment
+      ZEROSHEET_WORKLOAD_SPIFFE_ID: spiffe://zerosheet.internal/workload/api
+      ZEROSHEET_EXPECTED_HTTP_STATUS: "403"
+    labels:
+      org.zerosheet.workload: api
+    volumes:
+      - spire_agent_socket:/run/spire/agent/public:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - zerosheet-internal
+
+  mtls-wrong-server-id-probe:
+    # A valid worker must reject a bundle-valid certificate when the configured
+    # server allowlist expects another SPIFFE ID. The verifier requires this
+    # one-shot process to fail before HTTP is exchanged.
+    image: zerosheet-workloads:milestone-9
+    profiles: ["workload-mtls-probes"]
+    command: ["node", "apps/worker/dist/mtls-client.js"]
+    environment:
+      <<: *worker-mtls-environment
+      ZEROSHEET_EXPECTED_API_SPIFFE_ID: spiffe://zerosheet.internal/workload/not-the-api
+    labels:
+      org.zerosheet.workload: worker
+    volumes:
+      - spire_agent_socket:/run/spire/agent/public:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - zerosheet-internal
+
+  mtls-no-client-certificate-probe:
+    # This process receives the public CA bundle but no Workload API socket and
+    # therefore no client SVID. It must fail during the mutual-TLS handshake.
+    image: zerosheet-workloads:milestone-9
+    profiles: ["workload-mtls-probes"]
+    command: ["node", "apps/worker/dist/no-client-certificate-probe.js"]
+    environment:
+      ZEROSHEET_INTERNAL_MTLS_SERVER: mtls-api
+      ZEROSHEET_INTERNAL_MTLS_PORT: "3443"
+      ZEROSHEET_EXPECTED_API_SPIFFE_ID: spiffe://zerosheet.internal/workload/api
+      ZEROSHEET_SPIFFE_BUNDLE_FILE: /run/spire/bootstrap/bundle.pem
+    labels:
+      org.zerosheet.workload: unregistered
+    volumes:
+      - ./spire/generated:/run/spire/bootstrap:ro
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - zerosheet-internal
+
+  mtls-plaintext-probe:
+    # Network privacy is not a substitute for transport encryption. This
+    # negative control proves the internal port has no ordinary HTTP listener.
+    image: zerosheet-workloads:milestone-9
+    profiles: ["workload-mtls-probes"]
+    command: ["node", "apps/worker/dist/plaintext-probe.js"]
+    environment:
+      ZEROSHEET_INTERNAL_MTLS_SERVER: mtls-api
+      ZEROSHEET_INTERNAL_MTLS_PORT: "3443"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - zerosheet-internal
 
 volumes:
   # Docker owns the physical location. The stable logical name lets us replace

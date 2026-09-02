@@ -13,9 +13,9 @@ The product will combine:
 
 ## Current milestone
 
-Milestone 8 adds a SPIFFE/SPIRE workload-identity lab. The API and worker roles
-receive separate five-minute X.509-SVIDs from Docker-attested attributes, while
-an unregistered workload using the same image and socket receives no identity.
+Milestone 9 uses the API and worker's rotating SPIFFE X.509-SVIDs for a real
+TLS 1.3 connection. Both sides validate SPIRE's trust chain and the exact peer
+SPIFFE ID; another valid identity from the same trust domain is denied.
 
 ## Repository layout
 
@@ -25,7 +25,8 @@ apps/
   web/       Browser application
   worker/    Lifecycle, audit, and background jobs
 packages/
-  contracts/ Shared runtime-validated API contracts
+  contracts/          Shared runtime-validated API contracts
+  workload-identity/  SPIFFE Workload API and exact peer checks
 docs/
   architecture/ System boundaries and decisions
   learning/     Milestone notes and glossary
@@ -52,6 +53,7 @@ pnpm infra:contextual-authorization:verify
 pnpm infra:lifecycle:verify
 pnpm infra:workload-identity:provision
 pnpm infra:workload-identity:verify
+pnpm infra:workload-mtls:verify
 pnpm typecheck
 pnpm test
 pnpm dev
@@ -85,3 +87,7 @@ revocation, strict identity linking, and audit evidence are explained in
 SPIFFE IDs, trust domains, SVIDs, the Workload API, SPIRE server/agent roles,
 node bootstrap, and Docker workload attestation are explained in
 [`docs/learning/08-spiffe-spire-workload-identity.md`](docs/learning/08-spiffe-spire-workload-identity.md).
+
+Mutual TLS, exact peer authorization, streamed SVID rotation, and the private
+API-to-worker boundary are explained in
+[`docs/learning/09-workload-mtls-zero-trust.md`](docs/learning/09-workload-mtls-zero-trust.md).

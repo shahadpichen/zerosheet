@@ -61,3 +61,11 @@ Browser
     process receives no default workload identity.
 25. Trusting a signed SVID still requires checking its exact peer SPIFFE ID;
     membership in the trust domain alone is not authorization.
+26. Internal API-to-worker traffic uses TLS 1.3 with both peers presenting
+    SPIRE-issued X.509-SVIDs; there is no plaintext or shared-secret fallback.
+27. The worker verifies the exact API URI SAN, while the API verifies the chain
+    and separately authorizes only the exact worker URI SAN for reconciliation.
+28. SVID updates replace in-memory TLS contexts; invalid or expired credentials
+    fail closed instead of being persisted for later reuse.
+29. The workload-only listener is private and separate from human OIDC session
+    endpoints. Neither principal type substitutes for the other.

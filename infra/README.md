@@ -12,6 +12,10 @@ Infrastructure is introduced incrementally so each IAM service can be studied in
   Workload API socket.
 - `workload-identity-probes`: one-shot positive and negative attestation
   clients used only by the verifier.
+- `workload-mtls-lab`: the private Node API listener that consumes a rotating
+  API X.509-SVID and requires client certificates.
+- `workload-mtls-probes`: registered and negative Node clients that verify
+  exact peer authorization, mandatory client identity, and TLS-only transport.
 
 PostgreSQL has no profile so Docker Compose can treat it as the shared datastore dependency. Selecting `auth-lab` adds Keycloak and waits for PostgreSQL health before starting it.
 
@@ -88,7 +92,18 @@ and worker Docker selectors. The verifier fetches both five-minute EC
 X.509-SVIDs, validates their URI SANs, and proves an unregistered container with
 the same image and Workload API socket receives no identity.
 
+Milestone 9 adds `pnpm infra:workload-mtls:verify`. It builds the pinned Node
+24 workload image, starts an unprivileged private API listener, and proves a
+worker SVID receives HTTP 200 while a chain-valid API SVID is denied with HTTP 403. Additional controls reject the wrong server SPIFFE ID, a client without an
+SVID, plaintext HTTP, and any host port mapping. Private key material remains
+in process memory and is scanned out of all captured verification output.
+
 The Docker agent's host PID namespace and Docker daemon socket are a deliberate
 learning-lab tradeoff. Production should prefer a platform-native node agent
 and attestors. SPIRE management and Workload API sockets are never published as
 host TCP ports.
+
+The mTLS API's TCP 3443 declaration is internal-only and has no host mapping.
+Production will place equivalent workload listeners on an explicitly isolated
+network and retain exact ID allowlists; private network placement alone is not
+authentication.

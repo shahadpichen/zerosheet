@@ -1,0 +1,23 @@
+# Docker receives the repository as a build context. Excluding credentials and
+# local state is a security boundary: a later Dockerfile COPY must not be able
+# to place developer secrets inside an image layer by accident.
+.env
+.env.*
+!.env.example
+
+# Dependencies and build products are recreated from the pinned lockfile in a
+# Linux builder. Copying host/macOS artifacts would make the image larger and
+# could introduce native binaries for the wrong platform.
+**/node_modules
+**/dist
+**/coverage
+.pnpm-store
+
+# Source-control history, editor state, logs, and machine-generated SPIRE trust
+# material are not application runtime inputs.
+.git
+.DS_Store
+.idea
+.vscode
+*.log
+infra/spire/generated

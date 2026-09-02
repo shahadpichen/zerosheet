@@ -8,6 +8,7 @@
     "clean": "rm -rf dist",
     "dev": "node --env-file-if-exists=../../.env --env-file-if-exists=../../.env.openfga --import=tsx --watch src/server.ts",
     "start": "node --env-file-if-exists=../../.env --env-file-if-exists=../../.env.openfga dist/server.js",
+    "start:internal-mtls": "node dist/internal-workload-server.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -15,6 +16,7 @@
     "@fastify/cookie": "^11.1.2",
     "@openfga/sdk": "0.9.7",
     "@zerosheet/contracts": "workspace:*",
+    "@zerosheet/workload-identity": "workspace:*",
     "fastify": "^5.0.0",
     "openid-client": "^6.8.7",
     "pg": "^8.23.0",

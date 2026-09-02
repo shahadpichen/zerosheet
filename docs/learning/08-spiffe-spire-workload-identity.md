@@ -160,10 +160,10 @@ Short lifetime reduces the usefulness of stolen material and supports rapid
 rotation. It does not remove the need to protect memory, the Workload API
 socket, deployment authority, or the SPIRE signing keys.
 
-Milestone 8 proves issuance only. It does not yet make an HTTP call secure. In
-Milestone 9, a TLS client and server will both obtain rotating SVIDs, validate
-the trust bundle, and authorize the peer's exact SPIFFE ID. Encryption without
-peer-ID authorization would accept any workload in the trust domain.
+Milestone 8 proves issuance only. Milestone 9 now uses these identities for an
+actual TLS client and server, streams rotations, validates the trust bundle,
+and authorizes each peer's exact SPIFFE ID. Encryption without peer-ID
+authorization would accept any workload in the trust domain.
 
 ## Data and process boundaries
 
@@ -236,8 +236,7 @@ The live verifier proves:
 
 ## Deliberately deferred
 
-- Actual API-to-worker mTLS and exact peer allowlists (Milestone 9).
-- Streaming certificate rotation inside Node processes.
+- Applying the Milestone 9 API-to-worker mTLS boundary to the real outbox job.
 - Replacing OpenFGA's local pre-shared key with workload-authenticated traffic.
 - Production node attestation, image-signature selectors, and deployment policy.
 - HA SPIRE servers with PostgreSQL and externally protected signing keys.
