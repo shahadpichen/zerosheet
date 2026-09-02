@@ -12,7 +12,7 @@ The product will combine:
 
 ## Current milestone
 
-Milestone 1 adds the PostgreSQL and Keycloak identity foundation. Keycloak now owns authentication state and exposes the OIDC endpoints that the ZeroSheet API/BFF will consume in Milestone 2.
+Milestone 2 connects the ZeroSheet API/BFF to Keycloak through the OIDC Authorization Code flow with PKCE. The browser receives only an opaque HttpOnly product-session cookie; it never receives Keycloak tokens.
 
 ## Repository layout
 
@@ -39,9 +39,15 @@ infra/          Local and production infrastructure
 
 ```bash
 pnpm install
+pnpm infra:auth:up
+pnpm infra:db:migrate
 pnpm typecheck
 pnpm test
 pnpm dev
 ```
 
 The API listens on `http://127.0.0.1:3001` and the web application on `http://127.0.0.1:5173` by default.
+
+With the API and web app running, `pnpm infra:oidc:verify` checks the live
+PostgreSQL, Keycloak, PKCE, cookie, and redirect boundaries without printing
+credential values.

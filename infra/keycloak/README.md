@@ -22,7 +22,7 @@ JSON does not support comments. Adding non-standard comment properties could als
 
 ### BFF client settings
 
-- The client is confidential because the future API can protect a client secret. Browser JavaScript cannot.
+- The client is confidential because the API/BFF protects its client secret. Browser JavaScript never receives it.
 - Authorization Code is the only enabled human login flow.
 - PKCE `S256` binds the authorization code to the browser session that initiated login.
 - Implicit flow is disabled because it exposes tokens through browser redirects.
@@ -35,7 +35,7 @@ JSON does not support comments. Adding non-standard comment properties could als
 
 The imported learner account demonstrates Keycloak-owned username/password authentication. Its password comes from the ignored local `.env`, and `temporary: true` forces a password replacement on first interactive login.
 
-This user is not a ZeroSheet product user yet. The internal product record and external-identity mapping are introduced when the API handles its first OIDC callback.
+The first successful OIDC callback maps this Keycloak identity to a separate ZeroSheet product user by `(issuer, subject)`. Keycloak remains the authentication authority; the product database does not copy its password credential.
 
 ## Development versus production
 

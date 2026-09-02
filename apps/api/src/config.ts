@@ -1,0 +1,226 @@
+/**
+ * Runtime configuration is parsed once, before the HTTP server starts.
+ *
+ * Authentication configuration is part of the security boundary: accepting a
+ * typo as an empty client secret or treating an arbitrary string as a URL can
+ * turn a safe OIDC flow into a confusing runtime failure. These helpers keep
+ * validation small and dependency-free while producing errors that name the
+ * exact variable a developer must fix.
+ */
+
+export interface DatabaseConfig {
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password: string;
+  useTls: boolean;
+}
+
+export interface OidcConfig {
+  issuerUrl: URL;
+  allowInsecureHttp: boolean;
+  clientId: string;
+  clientSecret: string;
+  callbackUrl: URL;
+  postLogoutRedirectUrl: URL;
+}
+
+export interface AuthLifetimeConfig {
+  loginTransactionSeconds: number;
+  sessionSeconds: number;
+}
+
+export interface AuthCookieConfig {
+  secure: boolean;
+  loginTransactionName: string;
+  sessionName: string;
+}
+
+export interface RuntimeConfig {
+  host: string;
+  port: number;
+  logLevel: string;
+  webUrl: URL;
+  database: DatabaseConfig;
+  oidc: OidcConfig;
+  authLifetimes: AuthLifetimeConfig;
+  authCookies: AuthCookieConfig;
+}
+
+function required(environment: NodeJS.ProcessEnv, name: string): string {
+  const value = environment[name]?.trim();
+
+  if (!value) {
+    throw new Error(`${name} is required`);
+  }
+
+  return value;
+}
+
+function positiveInteger(
+  environment: NodeJS.ProcessEnv,
+  name: string,
+  fallback?: number,
+): number {
+  const rawValue = environment[name]?.trim();
+
+  if (!rawValue && fallback !== undefined) {
+    return fallback;
+  }
+
+  const value = Number.parseInt(rawValue ?? "", 10);
+
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+
+  return value;
+}
+
+function booleanValue(
+  environment: NodeJS.ProcessEnv,
+  name: string,
+  fallback: boolean,
+): boolean {
+  const rawValue = environment[name]?.trim().toLowerCase();
+
+  if (!rawValue) {
+    return fallback;
+  }
+
+  if (rawValue === "true") {
+    return true;
+  }
+
+  if (rawValue === "false") {
+    return false;
+  }
+
+  throw new Error(`${name} must be either true or false`);
+}
+
+function urlValue(environment: NodeJS.ProcessEnv, name: string): URL {
+  const value = required(environment, name);
+
+  try {
+    return new URL(value);
+  } catch {
+    throw new Error(`${name} must be an absolute URL`);
+  }
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  return (
+    hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]"
+  );
+}
+
+/**
+ * Production cookies use the `__Host-` prefix. Supporting browsers enforce
+ * that these cookies are Secure, host-only, and scoped to `/`, which prevents
+ * a sibling subdomain from planting a competing authentication cookie. Local
+ * HTTP cannot use Secure cookies, so the learning environment uses explicit
+ * development-only names instead.
+ */
+function cookieNames(
+  secure: boolean,
+): Pick<AuthCookieConfig, "loginTransactionName" | "sessionName"> {
+  if (secure) {
+    return {
+      loginTransactionName: "__Host-zerosheet_oidc_transaction",
+      sessionName: "__Host-zerosheet_session",
+    };
+  }
+
+  return {
+    loginTransactionName: "zerosheet_oidc_transaction",
+    sessionName: "zerosheet_session",
+  };
+}
+
+export function loadRuntimeConfig(
+  environment: NodeJS.ProcessEnv = process.env,
+): RuntimeConfig {
+  const nodeEnvironment = environment.NODE_ENV?.trim() || "development";
+  const secureCookies = booleanValue(
+    environment,
+    "ZEROSHEET_COOKIE_SECURE",
+    nodeEnvironment === "production",
+  );
+
+  if (nodeEnvironment === "production" && !secureCookies) {
+    throw new Error(
+      "ZEROSHEET_COOKIE_SECURE must be true when NODE_ENV is production",
+    );
+  }
+
+  const apiUrl = urlValue(environment, "ZEROSHEET_API_URL");
+  const webUrl = urlValue(environment, "ZEROSHEET_WEB_URL");
+  const issuerUrl = urlValue(environment, "ZEROSHEET_OIDC_ISSUER_URL");
+  const names = cookieNames(secureCookies);
+
+  if (
+    nodeEnvironment === "production" &&
+    (apiUrl.protocol !== "https:" || webUrl.protocol !== "https:")
+  ) {
+    throw new Error(
+      "ZEROSHEET_API_URL and ZEROSHEET_WEB_URL must use HTTPS when NODE_ENV is production",
+    );
+  }
+
+  /**
+   * OIDC normally requires HTTPS. The only exception is our local learning
+   * server bound to the loopback device; allowing HTTP for a LAN or production
+   * hostname would expose authorization codes and tokens to interception.
+   */
+  const allowInsecureHttp =
+    nodeEnvironment !== "production" &&
+    issuerUrl.protocol === "http:" &&
+    isLoopbackHostname(issuerUrl.hostname);
+
+  if (issuerUrl.protocol !== "https:" && !allowInsecureHttp) {
+    throw new Error(
+      "ZEROSHEET_OIDC_ISSUER_URL must use HTTPS outside the local loopback development environment",
+    );
+  }
+
+  return {
+    host: environment.API_HOST?.trim() || "127.0.0.1",
+    port: positiveInteger(environment, "API_PORT", 3001),
+    logLevel: environment.LOG_LEVEL?.trim() || "info",
+    webUrl,
+    database: {
+      host: environment.ZEROSHEET_DB_HOST?.trim() || "127.0.0.1",
+      port: positiveInteger(environment, "POSTGRES_HOST_PORT", 5434),
+      database: required(environment, "ZEROSHEET_DB_NAME"),
+      user: required(environment, "ZEROSHEET_DB_USER"),
+      password: required(environment, "ZEROSHEET_DB_PASSWORD"),
+      useTls: booleanValue(environment, "ZEROSHEET_DB_TLS", false),
+    },
+    oidc: {
+      issuerUrl,
+      allowInsecureHttp,
+      clientId: required(environment, "KEYCLOAK_BFF_CLIENT_ID"),
+      clientSecret: required(environment, "KEYCLOAK_BFF_CLIENT_SECRET"),
+      callbackUrl: new URL("/auth/callback", apiUrl),
+      postLogoutRedirectUrl: new URL("/", webUrl),
+    },
+    authLifetimes: {
+      loginTransactionSeconds: positiveInteger(
+        environment,
+        "ZEROSHEET_OIDC_TRANSACTION_TTL_SECONDS",
+        600,
+      ),
+      sessionSeconds: positiveInteger(
+        environment,
+        "ZEROSHEET_SESSION_TTL_SECONDS",
+        28_800,
+      ),
+    },
+    authCookies: {
+      secure: secureCookies,
+      ...names,
+    },
+  };
+}

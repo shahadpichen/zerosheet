@@ -21,3 +21,9 @@ PostgreSQL has no profile so Docker Compose can treat it as the shared datastore
 ## Persistence boundary
 
 The named `postgres_data` volume survives `docker compose down`. It is not a backup. A future milestone adds encrypted off-site dumps and a restore drill before public beta.
+
+## ZeroSheet schema migrations
+
+`pnpm infra:db:migrate` applies SQL files from `postgres/migrations` as the restricted `zerosheet_app` role. Using the runtime owner proves an application migration cannot silently modify Keycloak or OpenFGA state.
+
+Milestone 2 keeps the API on the developer host and uses the loopback PostgreSQL port. After `pnpm dev` is running, `pnpm infra:oidc:verify` checks both the migrated schema and the live API-to-Keycloak authorization redirect.

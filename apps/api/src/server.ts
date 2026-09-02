@@ -1,13 +1,13 @@
-import { buildApp } from "./app.js";
-
-const host = process.env.API_HOST ?? "127.0.0.1";
-const port = Number.parseInt(process.env.API_PORT ?? "3001", 10);
-
-const app = buildApp();
+import { createRuntimeApp } from "./runtime.js";
 
 try {
-  await app.listen({ host, port });
+  const { app, config } = await createRuntimeApp();
+  await app.listen({ host: config.host, port: config.port });
 } catch (error) {
-  app.log.error(error);
+  // Runtime construction may fail before Fastify exists (for example, missing
+  // configuration, an unapplied migration, or unavailable OIDC discovery).
+  // stderr is the only dependable logger at that boundary, and Node exits
+  // non-zero so a supervisor never mistakes a failed IAM startup for health.
+  console.error(error);
   process.exitCode = 1;
 }
