@@ -7,15 +7,15 @@ The product will combine:
 - Keycloak for authentication, federation, and enterprise SSO.
 - OpenFGA for relationship-based authorization.
 - OPA for contextual authorization policies.
+- SPIRE for short-lived SPIFFE workload identities.
 - PostgreSQL for product, identity-service, and authorization-service state.
 - Google Drive and Sheets for encrypted workbook storage and synchronization.
 
 ## Current milestone
 
-Milestone 7 adds tenant-scoped SCIM user lifecycle, immediate session
-revocation, OpenFGA membership reconciliation, and authorized append-only
-security audit export. Deactivation remains fail-closed even when an unrelated
-direct workbook share is still present.
+Milestone 8 adds a SPIFFE/SPIRE workload-identity lab. The API and worker roles
+receive separate five-minute X.509-SVIDs from Docker-attested attributes, while
+an unregistered workload using the same image and socket receives no identity.
 
 ## Repository layout
 
@@ -50,6 +50,8 @@ pnpm infra:db:migrate
 pnpm infra:product:verify
 pnpm infra:contextual-authorization:verify
 pnpm infra:lifecycle:verify
+pnpm infra:workload-identity:provision
+pnpm infra:workload-identity:verify
 pnpm typecheck
 pnpm test
 pnpm dev
@@ -79,3 +81,7 @@ composition are explained in
 SCIM provisioning, tenant-scoped joiner/mover/leaver behavior, session
 revocation, strict identity linking, and audit evidence are explained in
 [`docs/learning/07-enterprise-lifecycle-scim-audit.md`](docs/learning/07-enterprise-lifecycle-scim-audit.md).
+
+SPIFFE IDs, trust domains, SVIDs, the Workload API, SPIRE server/agent roles,
+node bootstrap, and Docker workload attestation are explained in
+[`docs/learning/08-spiffe-spire-workload-identity.md`](docs/learning/08-spiffe-spire-workload-identity.md).

@@ -248,10 +248,185 @@ services:
     networks:
       - zerosheet-internal
 
+  spire-server:
+    # SPIRE is the reference implementation of the SPIFFE workload-identity
+    # standards. It registers which attested workload may receive each SPIFFE
+    # ID and signs short-lived SVIDs; it does not authenticate human users.
+    image: ghcr.io/spiffe/spire-server:1.15.2
+    container_name: zerosheet-spire-server
+    profiles: ["workload-identity-lab"]
+    command: ["-config", "/opt/spire/conf/server/server.conf"]
+    user: "1000:1000"
+    volumes:
+      - ./spire/server:/opt/spire/conf/server:ro
+      - spire_server_data:/var/lib/spire/server
+      - spire_server_socket:/run/spire/server/private
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/opt/spire/bin/spire-server",
+          "healthcheck",
+          "-socketPath",
+          "/run/spire/server/private/api.sock",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 18
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: ${SPIRE_SERVER_MEMORY_LIMIT:-192m}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging: *local-logging
+    networks:
+      - zerosheet-internal
+
+  spire-agent:
+    # One agent represents this Docker node. The Workload API is a local Unix
+    # socket shared with selected workload containers, never a published TCP
+    # port. Docker attestation needs host PID visibility and the daemon socket;
+    # those high-impact permissions are called out rather than hidden.
+    image: ghcr.io/spiffe/spire-agent:1.15.2
+    container_name: zerosheet-spire-agent
+    profiles: ["workload-identity-lab"]
+    command: ["-expandEnv", "-config", "/opt/spire/conf/agent/agent.conf"]
+    environment:
+      SPIRE_AGENT_JOIN_TOKEN: ${SPIRE_AGENT_JOIN_TOKEN:-}
+    pid: host
+    volumes:
+      - ./spire/agent:/opt/spire/conf/agent:ro
+      - ./spire/generated:/run/spire/bootstrap:ro
+      - spire_agent_data:/var/lib/spire/agent
+      - spire_agent_socket:/run/spire/agent/public
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      spire-server:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/opt/spire/bin/spire-agent",
+          "healthcheck",
+          "-socketPath",
+          "/run/spire/agent/public/api.sock",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 18
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: ${SPIRE_AGENT_MEMORY_LIMIT:-128m}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging: *local-logging
+    networks:
+      - zerosheet-internal
+
+  spiffe-api-probe:
+    # This one-shot official CLI represents the API workload during the lab.
+    # The registration selector matches the label, not a secret passed here.
+    image: ghcr.io/spiffe/spire-agent:1.15.2
+    profiles: ["workload-identity-probes"]
+    entrypoint: ["/opt/spire/bin/spire-agent"]
+    command:
+      [
+        "api",
+        "fetch",
+        "x509",
+        "-output",
+        "json",
+        "-socketPath",
+        "/run/spire/agent/public/api.sock",
+      ]
+    labels:
+      org.zerosheet.workload: api
+    volumes:
+      - spire_agent_socket:/run/spire/agent/public:ro
+    network_mode: none
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  spiffe-worker-probe:
+    # Using the same image but a different attested label proves identity comes
+    # from workload attributes and registration policy, not image possession.
+    image: ghcr.io/spiffe/spire-agent:1.15.2
+    profiles: ["workload-identity-probes"]
+    entrypoint: ["/opt/spire/bin/spire-agent"]
+    command:
+      [
+        "api",
+        "fetch",
+        "x509",
+        "-output",
+        "json",
+        "-socketPath",
+        "/run/spire/agent/public/api.sock",
+      ]
+    labels:
+      org.zerosheet.workload: worker
+    volumes:
+      - spire_agent_socket:/run/spire/agent/public:ro
+    network_mode: none
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  spiffe-unregistered-probe:
+    # The negative control reaches the same socket with an unmatched label. A
+    # healthy agent must return no SVID rather than a default shared identity.
+    image: ghcr.io/spiffe/spire-agent:1.15.2
+    profiles: ["workload-identity-probes"]
+    entrypoint: ["/opt/spire/bin/spire-agent"]
+    command:
+      [
+        "api",
+        "fetch",
+        "x509",
+        "-output",
+        "json",
+        "-socketPath",
+        "/run/spire/agent/public/api.sock",
+      ]
+    labels:
+      org.zerosheet.workload: unregistered
+    volumes:
+      - spire_agent_socket:/run/spire/agent/public:ro
+    network_mode: none
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   # Docker owns the physical location. The stable logical name lets us replace
   # containers without changing where PostgreSQL stores its data.
   postgres_data:
+  # SPIRE control-plane state, the agent key, and the Workload API socket have
+  # different lifecycles and permissions, so they never share one volume.
+  spire_server_data:
+  spire_server_socket:
+  spire_agent_data:
+  spire_agent_socket:
 
 networks:
   # Only services attached to this bridge can resolve internal names such as

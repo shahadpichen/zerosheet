@@ -5,7 +5,9 @@
 
 ## Decision
 
-Use Keycloak as ZeroSheet's OIDC identity provider and identity broker, OpenFGA for durable relationships, OPA for contextual policy, and the ZeroSheet API as the policy enforcement point.
+Use Keycloak as ZeroSheet's OIDC identity provider and identity broker, OpenFGA
+for durable relationships, OPA for contextual policy, SPIRE as the SPIFFE
+workload-identity issuer, and the ZeroSheet API as the policy enforcement point.
 
 ## Why
 
@@ -21,4 +23,6 @@ Authentication proves who is making a request. Authorization decides what that p
   OpenFGA relationships.
 - Security decisions and lifecycle transitions append tenant-scoped audit
   evidence that is exported only after a composed administration decision.
+- API and worker processes receive separate, selector-bound, short-lived
+  X.509-SVIDs from a local SPIRE agent instead of sharing a workload password.
 - The deployment has more services, so local labs and the 2 GB staging VPS use Compose profiles.

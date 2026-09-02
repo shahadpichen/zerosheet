@@ -9,3 +9,8 @@ coverage/
 .DS_Store
 .idea/
 .vscode/
+
+# SPIRE bootstrap bundles are generated from the running trust domain. The
+# bundle is public, but keeping machine-local control-plane state out of Git
+# avoids pretending one developer's root is the production trust anchor.
+infra/spire/generated/

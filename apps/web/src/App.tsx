@@ -55,13 +55,13 @@ export function App() {
 
   return (
     <main>
-      <p className="eyebrow">Milestone 7 · Enterprise lifecycle</p>
-      <h1>Directory changes must become access changes.</h1>
+      <p className="eyebrow">Milestone 8 · Workload identity</p>
+      <h1>Every service must prove what it is.</h1>
       <p className="intro">
-        Keycloak establishes identity. SCIM manages tenant joiners and leavers.
-        OpenFGA relationships and OPA lifecycle policy must still agree before
-        ZeroSheet permits an action, and security outcomes become audit
-        evidence.
+        Keycloak identifies people. SPIRE separately attests running API and
+        worker processes and issues short-lived SPIFFE certificates. Human and
+        workload identities meet at the API boundary but never replace each
+        other.
       </p>
 
       <section className="session-card" aria-live="polite">
@@ -89,9 +89,9 @@ export function App() {
             <strong>{session.user.displayName}</strong>
             <span>{session.user.email}</span>
             <p className="authorization-note">
-              Your session proves who you are. A directory suspension revokes
-              it, removes tenant membership, and makes current OPA policy deny
-              even if another relationship has not yet been reconciled.
+              Your session proves who you are. The server also needs its own
+              rotating workload identity before another internal service should
+              trust it; neither identity grants workbook access alone.
             </p>
 
             {/* A normal form navigation follows Keycloak's logout redirect.
@@ -121,8 +121,8 @@ export function App() {
 
       <p className="boundary-note">
         Browser: opaque HttpOnly cookie · API: session and policy enforcement ·
-        Keycloak: authentication · SCIM: lifecycle · OpenFGA: relationships ·
-        OPA: context · PostgreSQL: audit evidence
+        Keycloak: human authentication · SPIRE: workload identity · OpenFGA:
+        relationships · OPA: context · PostgreSQL: audit evidence
       </p>
     </main>
   );

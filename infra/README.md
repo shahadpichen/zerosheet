@@ -8,6 +8,10 @@ Infrastructure is introduced incrementally so each IAM service can be studied in
 - `authorization-lab`: PostgreSQL and OpenFGA's migration/server services.
 - `contextual-authorization-lab`: stateless OPA with read-only ZeroSheet Rego
   policy.
+- `workload-identity-lab`: SPIRE server and one node agent with a local
+  Workload API socket.
+- `workload-identity-probes`: one-shot positive and negative attestation
+  clients used only by the verifier.
 
 PostgreSQL has no profile so Docker Compose can treat it as the shared datastore dependency. Selecting `auth-lab` adds Keycloak and waits for PostgreSQL health before starting it.
 
@@ -22,7 +26,10 @@ PostgreSQL has no profile so Docker Compose can treat it as the shared datastore
 
 ## Persistence boundary
 
-The named `postgres_data` volume survives `docker compose down`. It is not a backup. A future milestone adds encrypted off-site dumps and a restore drill before public beta.
+The named `postgres_data` volume survives `docker compose down`. SPIRE server,
+agent, and socket state use separate named volumes with different trust and
+lifecycle requirements. None of these volumes is a backup. A future milestone
+adds encrypted off-site dumps and a restore drill before public beta.
 
 ## ZeroSheet schema migrations
 
@@ -72,3 +79,16 @@ managed user, proves session and relationship revocation, verifies OPA denial
 over an unchanged direct share, exports authorized audit events, and confirms
 the database rejects an audit UPDATE. Temporary product state is cleaned up;
 append-only verifier audit evidence remains by design and contains random IDs.
+
+Milestone 8 adds `pnpm infra:workload-identity:provision` and
+`pnpm infra:workload-identity:verify`. Provisioning starts the pinned official
+SPIRE 1.15.2 server and agent, performs one-time node attestation, removes the
+consumed bootstrap token from container metadata, and registers separate API
+and worker Docker selectors. The verifier fetches both five-minute EC
+X.509-SVIDs, validates their URI SANs, and proves an unregistered container with
+the same image and Workload API socket receives no identity.
+
+The Docker agent's host PID namespace and Docker daemon socket are a deliberate
+learning-lab tradeoff. Production should prefer a platform-native node agent
+and attestors. SPIRE management and Workload API sockets are never published as
+host TCP ports.

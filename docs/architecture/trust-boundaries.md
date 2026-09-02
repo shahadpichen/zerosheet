@@ -12,6 +12,7 @@ Browser
       -> OpenFGA / relationship authorization
       -> OPA / contextual authorization
       -> PostgreSQL / product and session state
+      -> local SPIRE Workload API / short-lived workload identity
       -> Google APIs / encrypted workbook storage
 ```
 
@@ -52,3 +53,11 @@ Browser
     themselves; authentication identity remains keyed by issuer and subject.
 21. Audit export requires tenant administration, audit details exclude secrets
     and content, and ordinary application DML cannot rewrite recorded events.
+22. Human OIDC sessions and SPIFFE workload SVIDs identify different kinds of
+    principals and never substitute for each other.
+23. The Workload API remains a local Unix socket; SVID private keys stay in
+    process memory and are never committed, logged, or stored in PostgreSQL.
+24. API and worker use distinct selector-bound SPIFFE IDs. An unregistered
+    process receives no default workload identity.
+25. Trusting a signed SVID still requires checking its exact peer SPIFFE ID;
+    membership in the trust domain alone is not authorization.
