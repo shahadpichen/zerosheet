@@ -3,8 +3,8 @@
 ## Scope
 
 This threat model covers the IAM controls, browser cryptography, delegated
-Google storage boundary, and local selective-protection editor introduced
-through Milestone 12. It will evolve as multi-user sharing is integrated.
+Google storage boundary, selective-protection editor, direct user sharing, and
+workbook-key rotation introduced through Milestone 13.
 
 The goal is end-to-end confidentiality for protected workbook values: Google
 and ordinary ZeroSheet hosted services should store or transport ciphertext but
@@ -140,6 +140,42 @@ An authorized recipient can view plaintext and may copy, export, photograph, or
 re-share it. Revocation prevents future server-authorized access and future key
 versions; it cannot erase plaintext or keys already retained on a recipient's
 device. Rotation must be described as forward-looking, not remote deletion.
+
+### Sharing coordination and partial failure
+
+A secure share spans systems that cannot participate in one database
+transaction: Google Drive permission, the ZeroSheet recipient envelope, and the
+OpenFGA relationship. The browser creates the Google permission first because
+the provider returns the exact permission ID needed for a precise rollback. It
+then asks the API to validate and persist the opaque HPKE envelope together with
+the durable relationship intent. If that API step fails, the browser attempts
+to delete only the permission created by that share attempt.
+
+The rollback is best effort. A crash or loss of network between those calls can
+leave Google access without ZeroSheet authorization or a usable envelope. That
+state exposes Google-visible metadata and unprotected values, but it does not
+grant decryption of protected cells. Reconciliation and audit alerting are
+required in production. A recipient's ZeroSheet primary email may also name a
+different Google account, so the sharing UI must display and confirm the exact
+Google address rather than assuming equivalence.
+
+### Rotation and revocation windows
+
+Revocation is a staged saga rather than a single delete. The owner creates one
+fresh workbook key, seals it to the exact current key version of every remaining
+direct recipient, persists the complete envelope set, rewrites the bounded
+sheet range, removes the revoked Google permission, and finally advances the
+active key version while removing the OpenFGA relationship. Until completion,
+the old authorization and old ciphertext remain valid; after completion, a
+recipient who retained the old key may still decrypt an old copy.
+
+The pending rotation record and envelopes allow the same owner to resume after
+a browser, provider, or network failure without inventing another key. Version
+1 supports one bounded range of at most 10,000 cells and direct users only.
+Encrypted team sharing is denied because correct membership fan-out and
+rotation on every joiner/leaver event are deferred. Multi-range rewrite,
+provider reconciliation, and automated recovery are Milestone 14 hardening
+work, not properties that the current product should claim.
 
 ### HPKE sender authentication and public-key directory
 

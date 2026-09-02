@@ -1,4 +1,7 @@
-import type { AuthenticatedUser } from "@zerosheet/contracts";
+import type {
+  AuthenticatedUser,
+  RegisterEncryptionIdentityInput,
+} from "@zerosheet/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { AuthenticationFlowError } from "./auth/auth-service.js";
 import type {
@@ -9,6 +12,7 @@ import { buildApp } from "./app.js";
 import type { RuntimeConfig } from "./config.js";
 import type { AuditApplicationService } from "./audit/types.js";
 import type { GoogleStorageApplicationService } from "./google-storage/types.js";
+import type { WorkbookSecurityApplicationService } from "./encryption/types.js";
 import type {
   AuthorizationApplicationService,
   CheckWorkbookPermissionInput,
@@ -374,6 +378,63 @@ class FakeGoogleStorageService implements GoogleStorageApplicationService {
   }
 }
 
+/**
+ * HTTP tests use syntactically valid opaque key material. Cryptographic
+ * structure is tested in the service/validation suite; route tests only prove
+ * authentication, strict body parsing, status codes, and safe response shape.
+ */
+class FakeWorkbookSecurityService implements WorkbookSecurityApplicationService {
+  public registeredInput: RegisterEncryptionIdentityInput | undefined;
+
+  public registerIdentity(
+    _actor: AuthenticatedUser,
+    input: RegisterEncryptionIdentityInput,
+  ) {
+    this.registeredInput = input;
+    return Promise.resolve({
+      userId: testUser.id,
+      publicKey: input.publicKey,
+      encryptedPrivateKeyBackup: input.encryptedPrivateKeyBackup,
+    });
+  }
+
+  public ownIdentity() {
+    return Promise.reject(new ProductForbiddenError());
+  }
+
+  public ownIdentityVersion() {
+    return Promise.reject(new ProductForbiddenError());
+  }
+
+  public recipientKey() {
+    return Promise.reject(new ProductForbiddenError());
+  }
+
+  public initializeWorkbook() {
+    return Promise.reject(new ProductForbiddenError());
+  }
+
+  public workbookAccess() {
+    return Promise.reject(new ProductForbiddenError());
+  }
+
+  public setSecureUserShare() {
+    return Promise.reject(new ProductForbiddenError());
+  }
+
+  public rotationPlan() {
+    return Promise.reject(new ProductForbiddenError());
+  }
+
+  public stageRotation() {
+    return Promise.reject(new ProductForbiddenError());
+  }
+
+  public commitRotation() {
+    return Promise.reject(new ProductForbiddenError());
+  }
+}
+
 function testConfig(): RuntimeConfig {
   return {
     host: "127.0.0.1",
@@ -433,6 +494,7 @@ function makeApp(
   lifecycleService = new FakeLifecycleService(),
   auditService = new FakeAuditService(),
   googleStorageService = new FakeGoogleStorageService(),
+  workbookSecurityService = new FakeWorkbookSecurityService(),
 ) {
   return {
     app: buildApp({
@@ -442,6 +504,7 @@ function makeApp(
       lifecycleService,
       auditService,
       googleStorageService,
+      workbookSecurityService,
       config: testConfig(),
       logger: false,
     }),
@@ -451,6 +514,7 @@ function makeApp(
     lifecycleService,
     auditService,
     googleStorageService,
+    workbookSecurityService,
   };
 }
 
@@ -1042,5 +1106,68 @@ describe("ZeroSheet delegated Google storage boundary", () => {
 
     expect(response.statusCode).toBe(204);
     expect(setup.googleStorageService.disconnectedUserId).toBe(testUser.id);
+  });
+});
+
+describe("ZeroSheet encrypted workbook boundary", () => {
+  const publicKey = {
+    formatVersion: 1 as const,
+    keyVersion: 1,
+    suite: "DHKEM_P256_HKDF_SHA256_HKDF_SHA256_AES_256_GCM" as const,
+    publicKey: "A".repeat(87),
+    fingerprint: "a".repeat(64),
+  };
+
+  it("requires a product session before reading encrypted identity state", async () => {
+    const { app } = makeApp();
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/encryption/identities/me",
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({ authenticated: false });
+    expect(response.headers["cache-control"]).toBe("no-store");
+  });
+
+  it("accepts only public material and a phrase-encrypted backup", async () => {
+    const setup = makeApp();
+    setup.service.user = testUser;
+    apps.push(setup.app);
+    const encryptedPrivateKeyBackup = Buffer.from(
+      "test-encrypted-capsule",
+    ).toString("base64url");
+
+    const response = await setup.app.inject({
+      method: "POST",
+      url: "/encryption/identities",
+      cookies: { zerosheet_session: "opaque-browser-session" },
+      payload: { publicKey, encryptedPrivateKeyBackup },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(setup.workbookSecurityService.registeredInput).toEqual({
+      publicKey,
+      encryptedPrivateKeyBackup,
+    });
+    expect(JSON.stringify(response.json())).not.toContain("recoveryPhrase");
+  });
+
+  it("rejects role-only user sharing that omits its HPKE envelope", async () => {
+    const setup = makeApp();
+    setup.service.user = testUser;
+    apps.push(setup.app);
+
+    const response = await setup.app.inject({
+      method: "PUT",
+      url: `/workbooks/${setup.productService.workbook.id}/secure-shares/users/22222222-2222-4222-8222-222222222222`,
+      cookies: { zerosheet_session: "opaque-browser-session" },
+      payload: { role: "viewer" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: "invalid_request" });
   });
 });

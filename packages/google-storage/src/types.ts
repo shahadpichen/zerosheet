@@ -45,3 +45,14 @@ export interface GoogleReadRange {
   readonly range: string;
   readonly values: GoogleCellScalar[][];
 }
+
+export interface GoogleSheetTab {
+  readonly id: number;
+  readonly title: string;
+  readonly rowCount: number;
+  readonly columnCount: number;
+}
+
+export interface GoogleDrivePermission {
+  readonly id: string;
+}

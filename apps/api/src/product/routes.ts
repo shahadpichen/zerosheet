@@ -312,7 +312,10 @@ export function registerProductRoutes(
     return result.ok ? reply.code(204).send() : result.reply;
   });
 
-  registerWorkbookShareRoutes(app, options, "user");
+  // Direct user sharing now requires a matching HPKE envelope and Google Drive
+  // permission, so Milestone 13 exposes it only through `/secure-shares/users`.
+  // Leaving the former role-only route active would authorize a recipient who
+  // cannot decrypt and would bypass the coordinated Drive rollback workflow.
   registerWorkbookShareRoutes(app, options, "team");
 }
 

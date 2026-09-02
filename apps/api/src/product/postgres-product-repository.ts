@@ -534,6 +534,20 @@ export class PostgresProductRepository implements ProductRepository {
             "A team share must use a team from the workbook organization.",
           );
         }
+
+        const encryptedWorkbook = await client.query(
+          "SELECT 1 FROM workbook_encryption WHERE workbook_id = $1",
+          [input.workbookId],
+        );
+        if (encryptedWorkbook.rowCount !== 0) {
+          // One OpenFGA team userset can expand to many changing users, while
+          // HPKE requires one explicit envelope and Google permission per human.
+          // Until a membership fan-out reconciler exists, accepting this share
+          // would authorize users who cannot decrypt and cannot open the file.
+          throw new ProductConflictError(
+            "Encrypted team sharing requires per-member envelope synchronization and is not available yet.",
+          );
+        }
       }
 
       const table = this.shareTable(input.principal);

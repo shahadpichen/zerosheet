@@ -14,7 +14,9 @@ export {
   type GoogleAccessToken,
   type GoogleAccessTokenProvider,
   type GoogleCellScalar,
+  type GoogleDrivePermission,
   type GoogleReadRange,
+  type GoogleSheetTab,
   type GoogleSpreadsheetFile,
   type GoogleValueRange,
 } from "./types.js";

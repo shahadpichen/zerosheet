@@ -338,10 +338,10 @@ export function EncryptedSheetEditor() {
       </div>
 
       <p className="technical-warning">
-        This milestone intentionally does not upload the preview: its temporary
-        workbook key disappears on reload. Milestone 13 first persists the
-        creator’s HPKE key envelope, then enables real Google autosave without
-        risking permanently undecryptable data.
+        This sample remains local because it is not tied to a product workbook.
+        Real workbook creation stores the creator’s HPKE envelope before its
+        first Google write, so ZeroSheet never uploads ciphertext whose only
+        workbook key disappears on reload.
       </p>
     </section>
   );

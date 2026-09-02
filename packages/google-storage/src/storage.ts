@@ -2,7 +2,9 @@ import { GoogleStorageError } from "./errors.js";
 import type { AuthorizedGoogleRequest } from "./request.js";
 import type {
   GoogleCellScalar,
+  GoogleDrivePermission,
   GoogleReadRange,
+  GoogleSheetTab,
   GoogleSpreadsheetFile,
   GoogleValueRange,
 } from "./types.js";
@@ -73,6 +75,89 @@ export class GoogleWorkspaceStorage {
       throw new GoogleStorageError("GOOGLE_RESOURCE_NOT_FOUND");
     }
     return parseSpreadsheetFile(value);
+  }
+
+  /**
+   * AAD uses Google's stable numeric tab ID, while A1 requests need the human
+   * title. Reading both from Google prevents a caller from inventing either
+   * value when binding a new ZeroSheet workbook.
+   */
+  public async listSpreadsheetTabs(
+    spreadsheetId: string,
+  ): Promise<GoogleSheetTab[]> {
+    assertGoogleResourceId(spreadsheetId);
+    const response = await this.request.send({
+      api: "sheets",
+      path: `/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}`,
+      query: new URLSearchParams({
+        fields:
+          "sheets.properties(sheetId,title,gridProperties(rowCount,columnCount))",
+      }),
+    });
+    return parseSpreadsheetTabs(await readBoundedJson(response));
+  }
+
+  /**
+   * Google Drive permission and ZeroSheet/OpenFGA access are intentionally
+   * independent. The browser creates this permission first, then submits its
+   * opaque ID together with the HPKE envelope to the ZeroSheet API.
+   */
+  public async createUserPermission(input: {
+    readonly spreadsheetId: string;
+    readonly email: string;
+    readonly role: "reader" | "writer";
+  }): Promise<GoogleDrivePermission> {
+    assertGoogleResourceId(input.spreadsheetId);
+    const email = assertEmail(input.email);
+    const response = await this.request.send({
+      api: "drive",
+      path: `/drive/v3/files/${encodeURIComponent(input.spreadsheetId)}/permissions`,
+      method: "POST",
+      query: new URLSearchParams({
+        fields: "id",
+        sendNotificationEmail: "false",
+        supportsAllDrives: "true",
+      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "user",
+        role: input.role,
+        emailAddress: email,
+      }),
+    });
+    return parseDrivePermission(await readBoundedJson(response));
+  }
+
+  /**
+   * Delete only the exact opaque permission returned by Google. Revocation
+   * also rotates the workbook key because a removed user may have retained the
+   * old key or an earlier Google revision.
+   */
+  public async deletePermission(
+    spreadsheetId: string,
+    permissionId: string,
+  ): Promise<void> {
+    assertGoogleResourceId(spreadsheetId);
+    assertGoogleResourceId(permissionId);
+    try {
+      await this.request.send({
+        api: "drive",
+        path: `/drive/v3/files/${encodeURIComponent(spreadsheetId)}/permissions/${encodeURIComponent(permissionId)}`,
+        method: "DELETE",
+        query: new URLSearchParams({ supportsAllDrives: "true" }),
+      });
+    } catch (error) {
+      // A retried rotation may have deleted the permission before an API commit
+      // failed. Google's 404 is therefore the same safe end state: that exact
+      // permission no longer grants access.
+      if (
+        error instanceof GoogleStorageError &&
+        error.code === "GOOGLE_RESOURCE_NOT_FOUND"
+      ) {
+        return;
+      }
+      throw error;
+    }
   }
 
   /**
@@ -340,6 +425,50 @@ function parseSpreadsheetFile(value: unknown): GoogleSpreadsheetFile {
   };
 }
 
+function parseSpreadsheetTabs(value: unknown): GoogleSheetTab[] {
+  if (!isRecord(value) || !Array.isArray(value.sheets)) {
+    throw new GoogleStorageError("GOOGLE_INVALID_RESPONSE");
+  }
+  return value.sheets.map((sheet) => {
+    if (!isRecord(sheet) || !isRecord(sheet.properties)) {
+      throw new GoogleStorageError("GOOGLE_INVALID_RESPONSE");
+    }
+    const properties = sheet.properties;
+    const grid = properties.gridProperties;
+    if (
+      !isRecord(grid) ||
+      typeof properties.sheetId !== "number" ||
+      !Number.isSafeInteger(properties.sheetId) ||
+      properties.sheetId < 0 ||
+      typeof properties.title !== "string" ||
+      properties.title.length < 1 ||
+      properties.title.length > 100 ||
+      typeof grid.rowCount !== "number" ||
+      !Number.isSafeInteger(grid.rowCount) ||
+      grid.rowCount < 1 ||
+      typeof grid.columnCount !== "number" ||
+      !Number.isSafeInteger(grid.columnCount) ||
+      grid.columnCount < 1
+    ) {
+      throw new GoogleStorageError("GOOGLE_INVALID_RESPONSE");
+    }
+    return {
+      id: properties.sheetId,
+      title: properties.title,
+      rowCount: grid.rowCount,
+      columnCount: grid.columnCount,
+    };
+  });
+}
+
+function parseDrivePermission(value: unknown): GoogleDrivePermission {
+  if (!isRecord(value) || typeof value.id !== "string") {
+    throw new GoogleStorageError("GOOGLE_INVALID_RESPONSE");
+  }
+  assertGoogleResourceId(value.id, "GOOGLE_INVALID_RESPONSE");
+  return { id: value.id };
+}
+
 function parseFileVersion(value: unknown): { id: string; version: string } {
   if (
     !isRecord(value) ||
@@ -443,6 +572,19 @@ function assertTitle(title: string): string {
     throw new GoogleStorageError("GOOGLE_INVALID_INPUT");
   }
   return normalized;
+}
+
+function assertEmail(email: string): string {
+  if (
+    email.length < 3 ||
+    email.length > 254 ||
+    email.trim() !== email ||
+    containsAsciiControlCharacter(email) ||
+    !/^[^\s@]+@[^\s@]+$/u.test(email)
+  ) {
+    throw new GoogleStorageError("GOOGLE_INVALID_INPUT");
+  }
+  return email;
 }
 
 function assertUuid(value: string): void {

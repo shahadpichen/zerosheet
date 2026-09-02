@@ -131,20 +131,20 @@ browser may provide UUIDs, names, and one of the closed role values; it cannot
 provide an OpenFGA tuple, subject expression, relation name, creator, owner
 role, or lifecycle state.
 
-| Action                         | Route                                                     | Required relationship permission |
-| ------------------------------ | --------------------------------------------------------- | -------------------------------- |
-| Create organization            | `POST /organizations`                                     | authenticated product user       |
-| Add/change organization member | `PUT /organizations/:organizationId/members/:userId`      | `can_manage_members`             |
-| Remove organization member     | `DELETE /organizations/:organizationId/members/:userId`   | `can_manage_members`             |
-| Create team                    | `POST /organizations/:organizationId/teams`               | `can_manage_members`             |
-| Add/change team member         | `PUT /teams/:teamId/members/:userId`                      | team `can_manage`                |
-| Remove team member             | `DELETE /teams/:teamId/members/:userId`                   | team `can_manage`                |
-| Create workbook                | `POST /organizations/:organizationId/workbooks`           | `can_create_workbook`            |
-| Read workbook metadata         | `GET /workbooks/:workbookId`                              | `can_view`                       |
-| Add/change user share          | `PUT /workbooks/:workbookId/shares/users/:principalId`    | `can_manage_sharing`             |
-| Remove user share              | `DELETE /workbooks/:workbookId/shares/users/:principalId` | `can_manage_sharing`             |
-| Add/change team share          | `PUT /workbooks/:workbookId/shares/teams/:principalId`    | `can_manage_sharing`             |
-| Remove team share              | `DELETE /workbooks/:workbookId/shares/teams/:principalId` | `can_manage_sharing`             |
+| Action                             | Route                                                          | Required relationship permission |
+| ---------------------------------- | -------------------------------------------------------------- | -------------------------------- |
+| Create organization                | `POST /organizations`                                          | authenticated product user       |
+| Add/change organization member     | `PUT /organizations/:organizationId/members/:userId`           | `can_manage_members`             |
+| Remove organization member         | `DELETE /organizations/:organizationId/members/:userId`        | `can_manage_members`             |
+| Create team                        | `POST /organizations/:organizationId/teams`                    | `can_manage_members`             |
+| Add/change team member             | `PUT /teams/:teamId/members/:userId`                           | team `can_manage`                |
+| Remove team member                 | `DELETE /teams/:teamId/members/:userId`                        | team `can_manage`                |
+| Create workbook                    | `POST /organizations/:organizationId/workbooks`                | `can_create_workbook`            |
+| Read workbook metadata             | `GET /workbooks/:workbookId`                                   | `can_view`                       |
+| Add/change encrypted user share    | `PUT /workbooks/:workbookId/secure-shares/users/:principalId`  | `can_manage_sharing`             |
+| Remove/rotate encrypted user share | `POST /workbooks/:workbookId/encryption/rotations` then commit | `can_manage_sharing`             |
+| Add/change team share              | `PUT /workbooks/:workbookId/shares/teams/:principalId`         | `can_manage_sharing`             |
+| Remove team share                  | `DELETE /workbooks/:workbookId/shares/teams/:principalId`      | `can_manage_sharing`             |
 
 Names are trimmed and bounded to 200 characters. All IDs must be UUIDs. Request
 objects reject unrecognized fields, so a payload cannot smuggle `owner` or a
@@ -212,6 +212,12 @@ workbooks in PostgreSQL.
 
 A team may be shared only to a workbook in the same organization. Direct user
 shares may target an existing ZeroSheet user outside the organization.
+
+Milestone 13 disables the legacy role-only user-share route and requires the
+secure endpoint, which couples a role with the recipient's exact HPKE envelope.
+Team relationships still work for unencrypted product authorization, but an
+encrypted workbook rejects a new team share until member-by-member envelope
+fan-out and rotation on membership changes are implemented.
 
 ## Error and privacy behavior
 

@@ -125,6 +125,72 @@ describe("GoogleWorkspaceStorage", () => {
     expect(url.searchParams.getAll("ranges")).toEqual(["Sheet1!A1:C1"]);
   });
 
+  it("reads stable Google tab IDs required by cell AAD", async () => {
+    const { storage } = storageWithResponses(
+      Response.json({
+        sheets: [
+          {
+            properties: {
+              sheetId: 1938472,
+              title: "Customers",
+              gridProperties: { rowCount: 1000, columnCount: 26 },
+            },
+          },
+        ],
+      }),
+    );
+
+    await expect(storage.listSpreadsheetTabs(spreadsheetId)).resolves.toEqual([
+      { id: 1938472, title: "Customers", rowCount: 1000, columnCount: 26 },
+    ]);
+  });
+
+  it("creates and removes one exact Google user permission", async () => {
+    const { storage, fetchMock } = storageWithResponses(
+      Response.json({ id: "1Permission_Resource_Id_123" }),
+      new Response(null, { status: 204 }),
+    );
+
+    const permission = await storage.createUserPermission({
+      spreadsheetId,
+      email: "recipient@example.com",
+      role: "writer",
+    });
+    expect(permission.id).toBe("1Permission_Resource_Id_123");
+    const [createUrl, createInit] = fetchMock.mock.calls[0] as [
+      URL,
+      RequestInit,
+    ];
+    expect(createUrl.pathname).toContain("/permissions");
+    expect(createUrl.searchParams.get("sendNotificationEmail")).toBe("false");
+    expect(JSON.parse(jsonRequestBody(createInit))).toEqual({
+      type: "user",
+      role: "writer",
+      emailAddress: "recipient@example.com",
+    });
+
+    await storage.deletePermission(spreadsheetId, permission.id);
+    const [deleteUrl, deleteInit] = fetchMock.mock.calls[1] as [
+      URL,
+      RequestInit,
+    ];
+    expect(deleteInit.method).toBe("DELETE");
+    expect(deleteUrl.pathname).toContain(permission.id);
+  });
+
+  it("treats an already-missing permission as an idempotent revocation", async () => {
+    const { storage } = storageWithResponses(
+      new Response(null, { status: 404 }),
+    );
+
+    await expect(
+      storage.deletePermission(
+        spreadsheetId,
+        "1Permission_Already_Removed_123",
+      ),
+    ).resolves.toBeUndefined();
+  });
+
   it("creates and reads only an encrypted backup in appDataFolder", async () => {
     const encryptedBackup = new Uint8Array([90, 83, 1, 222, 173, 190, 239]);
     const { storage, fetchMock } = storageWithResponses(

@@ -118,3 +118,18 @@ Browser
 46. The Milestone 12 preview key is temporary and never uploads data. A real
     workbook save must wait until an HPKE envelope for the creator's public key
     has been durably stored, preventing ciphertext from outliving its only key.
+47. The API stores a user's public HPKE key and phrase-encrypted private-key
+    backup, but never accepts the recovery phrase or an opened private key.
+48. A direct encrypted-workbook share requires three independent artifacts: a
+    recipient HPKE envelope, a Google Drive permission, and an OpenFGA relation.
+49. Sharing creates the Google permission first, then records the envelope
+    before activating the relationship intent. An API failure triggers
+    best-effort deletion of the exact permission that this attempt created;
+    any leftover envelope is unusable without authorization.
+50. Revocation stages every remaining recipient envelope before rewriting
+    cells under a fresh key. Staged rotations are visible to the owner and can
+    be resumed after browser, Google, or network failure.
+51. Access removal and key rotation prevent a removed user from opening future
+    versions; they cannot erase keys or plaintext that user previously retained.
+52. Team sharing is denied for encrypted workbooks until every current member
+    can receive an exact envelope and membership changes can rotate the key.

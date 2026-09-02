@@ -105,6 +105,20 @@ export const WorkbookShareParametersSchema = z.object({
   principalId: z.string().uuid(),
 });
 
+export const WorkbookRecipientKeyParametersSchema = z.object({
+  workbookId: z.string().uuid(),
+  userId: z.string().uuid(),
+});
+
+export const WorkbookRotationParametersSchema = z.object({
+  workbookId: z.string().uuid(),
+  toKeyVersion: z.coerce.number().int().min(2).max(2_147_483_647),
+});
+
+export const EncryptionIdentityVersionParametersSchema = z.object({
+  keyVersion: z.coerce.number().int().min(1).max(2_147_483_647),
+});
+
 export const OrganizationMemberInputSchema = z
   .object({
     role: z.enum(["admin", "member"]),
@@ -171,6 +185,136 @@ export const ProductErrorResponseSchema = z.object({
     "authorization_unavailable",
   ]),
   message: z.string().min(1),
+});
+
+/**
+ * The HPKE identifiers below are persisted protocol constants, not caller-
+ * selected algorithms. Accepting only version 1 prevents downgrade or
+ * algorithm-confusion input from entering the public-key directory.
+ */
+export const UserPublicEncryptionKeySchema = z
+  .object({
+    formatVersion: z.literal(1),
+    keyVersion: z.number().int().min(1).max(2_147_483_647),
+    suite: z.literal("DHKEM_P256_HKDF_SHA256_HKDF_SHA256_AES_256_GCM"),
+    publicKey: z.string().regex(/^[A-Za-z0-9_-]{80,100}$/u),
+    fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+  })
+  .strict();
+
+export const WorkbookKeyEnvelopeSchema = z
+  .object({
+    formatVersion: z.literal(1),
+    suite: z.literal("DHKEM_P256_HKDF_SHA256_HKDF_SHA256_AES_256_GCM"),
+    workbookKeyVersion: z.number().int().min(1).max(2_147_483_647),
+    recipientKeyVersion: z.number().int().min(1).max(2_147_483_647),
+    recipientFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+    encapsulatedKey: z.string().regex(/^[A-Za-z0-9_-]{80,100}$/u),
+    ciphertext: z.string().regex(/^[A-Za-z0-9_-]{60,80}$/u),
+  })
+  .strict();
+
+/**
+ * The encrypted backup is base64url transport for a phrase-protected Capsule.
+ * The server stores it opaquely and never accepts or returns the recovery
+ * phrase. The generous string limit represents the 256 KiB decoded cap.
+ */
+export const RegisterEncryptionIdentityInputSchema = z
+  .object({
+    publicKey: UserPublicEncryptionKeySchema,
+    encryptedPrivateKeyBackup: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]+$/u)
+      .max(349_526),
+  })
+  .strict();
+
+export const EncryptionIdentityResponseSchema = z.object({
+  userId: z.string().uuid(),
+  publicKey: UserPublicEncryptionKeySchema,
+  encryptedPrivateKeyBackup: z.string().regex(/^[A-Za-z0-9_-]+$/u),
+});
+
+export const RecipientEncryptionKeyResponseSchema = z.object({
+  userId: z.string().uuid(),
+  email: z.string().email(),
+  publicKey: UserPublicEncryptionKeySchema,
+});
+
+export const InitializeWorkbookEncryptionInputSchema = z
+  .object({
+    googleSpreadsheetId: z.string().regex(/^[A-Za-z0-9_-]{10,256}$/u),
+    googleSheetId: z.number().int().min(0).max(2_147_483_647),
+    googleSheetTitle: z.string().min(1).max(100),
+    creatorEnvelope: WorkbookKeyEnvelopeSchema,
+  })
+  .strict();
+
+export const SecureWorkbookShareInputSchema = z
+  .object({
+    role: z.enum(["editor", "viewer"]),
+    googlePermissionId: z.string().regex(/^[A-Za-z0-9_-]{3,256}$/u),
+    recipientEnvelope: WorkbookKeyEnvelopeSchema,
+  })
+  .strict();
+
+export const WorkbookEncryptionAccessResponseSchema = z.object({
+  workbookId: z.string().uuid(),
+  googleSpreadsheetId: z.string(),
+  googleSheetId: z.number().int().min(0),
+  googleSheetTitle: z.string().min(1).max(100),
+  activeKeyVersion: z.number().int().min(1),
+  envelope: WorkbookKeyEnvelopeSchema,
+  pendingRotation: z
+    .object({
+      toKeyVersion: z.number().int().min(2),
+      envelope: WorkbookKeyEnvelopeSchema,
+    })
+    .nullable(),
+});
+
+export const WorkbookEncryptionStateResponseSchema = z.object({
+  workbookId: z.string().uuid(),
+  googleSpreadsheetId: z.string(),
+  googleSheetId: z.number().int().min(0),
+  googleSheetTitle: z.string().min(1).max(100),
+  activeKeyVersion: z.number().int().min(1),
+  rotationState: z.enum(["active", "rotation_pending"]),
+  pendingKeyVersion: z.number().int().min(2).nullable(),
+});
+
+export const StageWorkbookRotationInputSchema = z
+  .object({
+    revokedUserId: z.string().uuid(),
+    toKeyVersion: z.number().int().min(2).max(2_147_483_647),
+    remainingRecipientEnvelopes: z
+      .array(
+        z.object({
+          userId: z.string().uuid(),
+          envelope: WorkbookKeyEnvelopeSchema,
+        }),
+      )
+      .min(1)
+      .max(10_000),
+  })
+  .strict();
+
+export const WorkbookRotationResponseSchema = z.object({
+  workbookId: z.string().uuid(),
+  fromKeyVersion: z.number().int().min(1),
+  toKeyVersion: z.number().int().min(2),
+  revokedUserId: z.string().uuid(),
+  state: z.enum(["pending", "committed"]),
+});
+
+export const WorkbookRotationPlanResponseSchema = z.object({
+  workbookId: z.string().uuid(),
+  fromKeyVersion: z.number().int().min(1),
+  toKeyVersion: z.number().int().min(2),
+  revokedUserId: z.string().uuid(),
+  rotationState: z.enum(["new", "pending"]),
+  googlePermissionId: z.string().regex(/^[A-Za-z0-9_-]{3,256}$/u),
+  remainingRecipients: z.array(RecipientEncryptionKeyResponseSchema).min(1),
 });
 
 /**
@@ -251,6 +395,40 @@ export type TeamMembershipResponse = z.infer<
 >;
 export type WorkbookShareResponse = z.infer<typeof WorkbookShareResponseSchema>;
 export type ProductErrorResponse = z.infer<typeof ProductErrorResponseSchema>;
+export type UserPublicEncryptionKey = z.infer<
+  typeof UserPublicEncryptionKeySchema
+>;
+export type WorkbookKeyEnvelope = z.infer<typeof WorkbookKeyEnvelopeSchema>;
+export type RegisterEncryptionIdentityInput = z.infer<
+  typeof RegisterEncryptionIdentityInputSchema
+>;
+export type EncryptionIdentityResponse = z.infer<
+  typeof EncryptionIdentityResponseSchema
+>;
+export type RecipientEncryptionKeyResponse = z.infer<
+  typeof RecipientEncryptionKeyResponseSchema
+>;
+export type InitializeWorkbookEncryptionInput = z.infer<
+  typeof InitializeWorkbookEncryptionInputSchema
+>;
+export type SecureWorkbookShareInput = z.infer<
+  typeof SecureWorkbookShareInputSchema
+>;
+export type WorkbookEncryptionAccessResponse = z.infer<
+  typeof WorkbookEncryptionAccessResponseSchema
+>;
+export type WorkbookEncryptionStateResponse = z.infer<
+  typeof WorkbookEncryptionStateResponseSchema
+>;
+export type StageWorkbookRotationInput = z.infer<
+  typeof StageWorkbookRotationInputSchema
+>;
+export type WorkbookRotationResponse = z.infer<
+  typeof WorkbookRotationResponseSchema
+>;
+export type WorkbookRotationPlanResponse = z.infer<
+  typeof WorkbookRotationPlanResponseSchema
+>;
 export type GoogleStorageConnectionStatus = z.infer<
   typeof GoogleStorageConnectionStatusSchema
 >;

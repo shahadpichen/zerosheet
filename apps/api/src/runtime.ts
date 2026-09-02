@@ -22,6 +22,8 @@ import {
 import { PostgresGoogleStorageRepository } from "./google-storage/postgres-google-storage-repository.js";
 import { AesGcmGoogleRefreshTokenProtector } from "./google-storage/refresh-token-protector.js";
 import type { GoogleStorageApplicationService } from "./google-storage/types.js";
+import { PostgresWorkbookSecurityRepository } from "./encryption/postgres-workbook-security-repository.js";
+import { WorkbookSecurityService } from "./encryption/workbook-security-service.js";
 
 /**
  * This composition root is the only place that chooses concrete adapters.
@@ -45,6 +47,10 @@ export async function createRuntimeApp() {
     await auditRepository.assertReady();
     const lifecycleRepository = new PostgresLifecycleRepository(pool);
     await lifecycleRepository.assertReady();
+    const workbookSecurityRepository = new PostgresWorkbookSecurityRepository(
+      pool,
+    );
+    await workbookSecurityRepository.assertReady();
 
     const oidc = await createOpenIdClientGateway(config.oidc);
     const authService = new AuthService({
@@ -81,6 +87,11 @@ export async function createRuntimeApp() {
       auditRepository,
       authorizationService,
     );
+    const workbookSecurityService = new WorkbookSecurityService({
+      repository: workbookSecurityRepository,
+      decisions: authorizationService,
+      product: productService,
+    });
     let googleStorageService: GoogleStorageApplicationService =
       new DisabledGoogleStorageService();
 
@@ -124,6 +135,7 @@ export async function createRuntimeApp() {
       lifecycleService,
       auditService,
       googleStorageService,
+      workbookSecurityService,
       config,
     });
 

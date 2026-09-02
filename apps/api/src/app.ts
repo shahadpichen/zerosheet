@@ -5,6 +5,8 @@ import Fastify, {
   type FastifyServerOptions,
 } from "fastify";
 import type { RuntimeConfig } from "./config.js";
+import { registerWorkbookSecurityRoutes } from "./encryption/routes.js";
+import type { WorkbookSecurityApplicationService } from "./encryption/types.js";
 import { registerGoogleStorageRoutes } from "./google-storage/routes.js";
 import type { GoogleStorageApplicationService } from "./google-storage/types.js";
 import { registerAuditRoutes } from "./audit/routes.js";
@@ -25,6 +27,7 @@ export interface BuildAppOptions {
   lifecycleService: LifecycleApplicationService;
   auditService: AuditApplicationService;
   googleStorageService: GoogleStorageApplicationService;
+  workbookSecurityService: WorkbookSecurityApplicationService;
   config: RuntimeConfig;
   logger?: boolean;
 }
@@ -164,6 +167,21 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
       transactionSeconds: options.config.googleStorage.transactionSeconds,
       callbackUrl: options.config.googleStorage.callbackUrl,
       webUrl: options.config.webUrl,
+    });
+    done();
+  });
+
+  /**
+   * Workbook security has its own PEP plugin because its payloads are public
+   * keys and opaque envelopes, never generic product metadata. Keeping these
+   * routes together ensures every directory lookup, share, and rotation uses
+   * the authenticated session plus the composed workbook decision service.
+   */
+  void app.register((workbookSecurityScope, _pluginOptions, done) => {
+    registerWorkbookSecurityRoutes(workbookSecurityScope, {
+      authentication: options.authService,
+      security: options.workbookSecurityService,
+      cookies: options.config.authCookies,
     });
     done();
   });

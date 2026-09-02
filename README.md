@@ -13,19 +13,19 @@ The product will combine:
 
 ## Current milestone
 
-Milestone 12 adds the local Univer spreadsheet editor and a storage-independent
-selective-protection core. A drag selection or whole columns can be protected,
-one 100 × 100 batch can be encrypted/decrypted in the browser, and queued saves
-retain immutable snapshots while detecting ordinary Google Drive conflicts.
-The editor preview deliberately does not upload its temporary key; Milestone 13
-will persist the creator's HPKE envelope before real autosave is enabled.
+Milestone 13 adds the secure multi-user workbook-key lifecycle. The browser
+creates each user's HPKE identity, keeps the recovery phrase and usable private
+key outside the server, stores the creator's envelope before the first Google
+write, and coordinates direct sharing across Google Drive, the ZeroSheet API,
+and OpenFGA. Revocation uses resumable workbook-key rotation so a removed user
+does not receive future ciphertext versions.
 
 ## Repository layout
 
 ```text
 apps/
   api/       HTTP API and policy enforcement point
-  web/       Browser application
+  web/       Browser editor and secure Google/share coordinator
   worker/    Lifecycle, audit, and background jobs
 packages/
   contracts/          Shared runtime-validated API contracts
@@ -65,6 +65,7 @@ pnpm infra:workload-mtls:verify
 pnpm crypto:benchmark:cells
 pnpm infra:google-storage:verify
 pnpm sheet:benchmark:sync
+pnpm infra:sharing:verify
 pnpm typecheck
 pnpm test
 pnpm dev
@@ -116,6 +117,10 @@ explained in
 The Univer editor boundary, drag/column protection, 10,000-cell codec,
 immutable autosave queue, and Google conflict limitations are explained in
 [`docs/learning/12-encrypted-spreadsheet-editor.md`](docs/learning/12-encrypted-spreadsheet-editor.md).
+
+The user HPKE directory, safe first write, three-part sharing transaction,
+failure rollback, and resumable key rotation are explained in
+[`docs/learning/13-secure-workbook-sharing.md`](docs/learning/13-secure-workbook-sharing.md).
 
 The persistent cell contract and security analysis live in
 [`docs/specifications/encrypted-cell-v1.md`](docs/specifications/encrypted-cell-v1.md)
