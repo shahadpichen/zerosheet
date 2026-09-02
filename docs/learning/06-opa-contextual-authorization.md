@@ -108,7 +108,11 @@ OPA receives a minimized document shaped like this:
 
 ```json
 {
-  "subject": { "id": "product-user-id", "status": "active" },
+  "subject": {
+    "id": "product-user-id",
+    "status": "active",
+    "organizationStatus": "active"
+  },
   "organization": { "id": "organization-id", "status": "active" },
   "resource": { "type": "workbook", "id": "workbook-id" },
   "action": "can_view",
@@ -116,7 +120,12 @@ OPA receives a minimized document shaped like this:
 }
 ```
 
-It does not receive names, email addresses, Keycloak tokens, session tokens,
+`organizationStatus` is the subject's tenant-scoped lifecycle fact. It is
+absent for the platform-level organization-creation action and defaults to
+active only when no directory management row exists. An explicit suspended row
+denies existing-resource access.
+
+OPA does not receive names, email addresses, Keycloak tokens, session tokens,
 OpenFGA tuples, workbook content, Google tokens, or encryption material.
 
 `create_organization` is special because an organization and its OpenFGA owner
@@ -191,7 +200,7 @@ pnpm dev:api
 pnpm infra:contextual-authorization:verify
 ```
 
-The policy test runs nine cases directly in OPA. The TypeScript suite covers
+The policy test runs ten cases directly in OPA. The TypeScript suite covers
 decision composition, minimized context, malformed responses, dependency
 errors, and the PostgreSQL projection.
 
@@ -214,10 +223,13 @@ The live verifier proves:
 7. Unknown action/resource combinations remain denied.
 8. OPA unavailability never degrades into permission.
 
+Milestone 7 implements the first tenant-scoped SCIM suspension and audit path;
+see
+[`07-enterprise-lifecycle-scim-audit.md`](07-enterprise-lifecycle-scim-audit.md).
+
 ## Deliberately deferred
 
-- Administrative suspension APIs, approval workflows, and audit events.
-- SCIM provisioning and deprovisioning.
+- Human administrative suspension APIs and approval workflows.
 - Device posture, IP/network zone, time-window, and risk signals.
 - Step-up authentication for sensitive administration.
 - Fine-grained policy bundles, signed distribution, and rollback automation.

@@ -30,6 +30,7 @@ allow if {
   is_string(input.subject.id)
   input.subject.id != ""
   input.subject.status == "active"
+  input.subject.organizationStatus == "active"
   is_string(input.organization.id)
   input.organization.id != ""
   input.organization.status == "active"

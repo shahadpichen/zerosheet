@@ -33,6 +33,11 @@ relationship-outbox tables. The outbox is ZeroSheet product state; OpenFGA
 continues to own and evaluate the applied relationship graph in its isolated
 database.
 
+Migration 004 adds tenant-bound SCIM connections, managed users,
+organization-user lifecycle facts, and append-only security audit events. The
+API stores only SCIM credential digests; plaintext credentials exist only in
+the administrator's creation response.
+
 Milestone 3 keeps the API on the developer host and adds Google as a Keycloak-
 brokered upstream identity provider. `pnpm infra:federation:google:configure`
 creates or updates that provider for an existing realm, while
@@ -60,3 +65,10 @@ services. `pnpm infra:contextual-authorization:policy:test` runs Rego tests in
 the pinned engine. After migration 003 and the API are running,
 `pnpm infra:contextual-authorization:verify` proves account/tenant suspension
 overrides an unchanged OpenFGA allow and that reactivation restores access.
+
+Milestone 7 adds `pnpm infra:lifecycle:verify`. With the API running, it creates
+a temporary tenant and SCIM connection, provisions/deactivates/reactivates a
+managed user, proves session and relationship revocation, verifies OPA denial
+over an unchanged direct share, exports authorized audit events, and confirms
+the database rejects an audit UPDATE. Temporary product state is cleaned up;
+append-only verifier audit evidence remains by design and contains random IDs.

@@ -31,6 +31,7 @@
     "infra:authorization:verify": "bash infra/scripts/verify-authorization-foundation.sh",
     "infra:contextual-authorization:policy:test": "bash infra/scripts/test-opa-policy.sh",
     "infra:contextual-authorization:verify": "bash infra/scripts/verify-contextual-authorization.sh",
+    "infra:lifecycle:verify": "bash infra/scripts/verify-enterprise-lifecycle.sh",
     "infra:product:verify": "bash infra/scripts/verify-product-authorization-lifecycle.sh",
     "infra:oidc:verify": "bash infra/scripts/verify-oidc-bff.sh",
     "lint": "eslint . --max-warnings=0",

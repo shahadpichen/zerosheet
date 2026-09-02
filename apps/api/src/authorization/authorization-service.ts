@@ -9,11 +9,13 @@ import type {
   OrganizationPolicyContext,
   PolicyContextRepository,
 } from "./types.js";
+import type { AuditRecorder } from "../audit/types.js";
 
 export interface AuthorizationServiceOptions {
   relationships: AuthorizationGateway;
   context: PolicyContextRepository;
   policy: ContextualPolicyGateway;
+  audit: AuditRecorder;
 }
 
 /**
@@ -33,15 +35,32 @@ export class AuthorizationService implements AuthorizationApplicationService {
     );
 
     if (!context) {
+      await this.recordDecision(
+        input.userId,
+        undefined,
+        "create_organization",
+        { type: "platform", id: "zerosheet" },
+        false,
+        "policy_context_missing",
+      );
       return false;
     }
 
-    return this.options.policy.evaluate({
+    const allowed = await this.options.policy.evaluate({
       ...context,
       resource: { type: "platform", id: "zerosheet" },
       action: "create_organization",
       relationship: { required: false, allowed: false },
     });
+    await this.recordDecision(
+      input.userId,
+      undefined,
+      "create_organization",
+      { type: "platform", id: "zerosheet" },
+      allowed,
+      allowed ? "context_policy_allowed" : "context_policy_denied",
+    );
+    return allowed;
   }
 
   public async canAccessOrganization(
@@ -53,6 +72,14 @@ export class AuthorizationService implements AuthorizationApplicationService {
     if (!relationshipAllowed) {
       // A relationship denial is final. Avoiding the later queries also keeps
       // nonexistent-resource details from becoming an observable side channel.
+      await this.recordDecision(
+        input.userId,
+        input.organizationId,
+        input.permission,
+        { type: "organization", id: input.organizationId },
+        false,
+        "relationship_denied",
+      );
       return false;
     }
 
@@ -63,6 +90,8 @@ export class AuthorizationService implements AuthorizationApplicationService {
 
     return this.evaluateResource(
       context,
+      input.userId,
+      input.organizationId,
       { type: "organization", id: input.organizationId },
       input.permission,
     );
@@ -75,6 +104,14 @@ export class AuthorizationService implements AuthorizationApplicationService {
       await this.options.relationships.checkTeamPermission(input);
 
     if (!relationshipAllowed) {
+      await this.recordDecision(
+        input.userId,
+        undefined,
+        input.permission,
+        { type: "team", id: input.teamId },
+        false,
+        "relationship_denied",
+      );
       return false;
     }
 
@@ -85,6 +122,8 @@ export class AuthorizationService implements AuthorizationApplicationService {
 
     return this.evaluateResource(
       context,
+      input.userId,
+      context?.organization.id,
       { type: "team", id: input.teamId },
       input.permission,
     );
@@ -97,6 +136,14 @@ export class AuthorizationService implements AuthorizationApplicationService {
       await this.options.relationships.checkWorkbookPermission(input);
 
     if (!relationshipAllowed) {
+      await this.recordDecision(
+        input.userId,
+        undefined,
+        input.permission,
+        { type: "workbook", id: input.workbookId },
+        false,
+        "relationship_denied",
+      );
       return false;
     }
 
@@ -107,13 +154,17 @@ export class AuthorizationService implements AuthorizationApplicationService {
 
     return this.evaluateResource(
       context,
+      input.userId,
+      context?.organization.id,
       { type: "workbook", id: input.workbookId },
       input.permission,
     );
   }
 
-  private evaluateResource(
+  private async evaluateResource(
     context: OrganizationPolicyContext | null,
+    userId: string,
+    organizationId: string | undefined,
     resource: { type: "organization" | "team" | "workbook"; id: string },
     action:
       | CheckOrganizationPermissionInput["permission"]
@@ -121,14 +172,49 @@ export class AuthorizationService implements AuthorizationApplicationService {
       | CheckWorkbookPermissionInput["permission"],
   ): Promise<boolean> {
     if (!context) {
-      return Promise.resolve(false);
+      await this.recordDecision(
+        userId,
+        organizationId,
+        action,
+        resource,
+        false,
+        "policy_context_missing",
+      );
+      return false;
     }
 
-    return this.options.policy.evaluate({
+    const allowed = await this.options.policy.evaluate({
       ...context,
       resource,
       action,
       relationship: { required: true, allowed: true },
+    });
+    await this.recordDecision(
+      userId,
+      context.organization.id,
+      action,
+      resource,
+      allowed,
+      allowed ? "composed_policy_allowed" : "context_policy_denied",
+    );
+    return allowed;
+  }
+
+  private recordDecision(
+    userId: string,
+    organizationId: string | undefined,
+    action: string,
+    resource: { type: string; id: string },
+    allowed: boolean,
+    reasonCode: string,
+  ): Promise<void> {
+    return this.options.audit.record({
+      actor: { type: "user", id: userId },
+      ...(organizationId ? { organizationId } : {}),
+      action,
+      resource,
+      outcome: allowed ? "allowed" : "denied",
+      reasonCode,
     });
   }
 }

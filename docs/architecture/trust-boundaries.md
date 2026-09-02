@@ -44,3 +44,11 @@ Browser
     pending resource metadata, or an unavailable PDP fails closed.
 17. OPA receives only minimized identifiers, lifecycle status, the fixed
     action/resource pair, and the OpenFGA result—never credentials or content.
+18. SCIM provisioning credentials are tenant-bound and stored only as digests;
+    they are not browser sessions and cannot authenticate product requests.
+19. A tenant-scoped suspended lifecycle row denies access and revokes existing
+    sessions before asynchronous relationship cleanup can succeed or fail.
+20. Directory usernames or email addresses never link OIDC identities by
+    themselves; authentication identity remains keyed by issuer and subject.
+21. Audit export requires tenant administration, audit details exclude secrets
+    and content, and ordinary application DML cannot rewrite recorded events.

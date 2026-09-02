@@ -1,4 +1,6 @@
 import { AuthService } from "./auth/auth-service.js";
+import { AuditService } from "./audit/audit-service.js";
+import { PostgresAuditRepository } from "./audit/postgres-audit-repository.js";
 import { createOpenIdClientGateway } from "./auth/openid-client-gateway.js";
 import { PostgresAuthRepository } from "./auth/postgres-auth-repository.js";
 import { buildApp } from "./app.js";
@@ -8,6 +10,8 @@ import { AuthorizationService } from "./authorization/authorization-service.js";
 import { createOpaContextualPolicyGateway } from "./authorization/opa-contextual-policy-gateway.js";
 import { createOpenFgaAuthorizationGateway } from "./authorization/openfga-authorization-gateway.js";
 import { PostgresPolicyContextRepository } from "./authorization/postgres-policy-context-repository.js";
+import { LifecycleService } from "./lifecycle/lifecycle-service.js";
+import { PostgresLifecycleRepository } from "./lifecycle/postgres-lifecycle-repository.js";
 import { PostgresProductRepository } from "./product/postgres-product-repository.js";
 import { ProductService } from "./product/product-service.js";
 
@@ -29,6 +33,10 @@ export async function createRuntimeApp() {
     await productRepository.assertReady();
     const policyContextRepository = new PostgresPolicyContextRepository(pool);
     await policyContextRepository.assertReady();
+    const auditRepository = new PostgresAuditRepository(pool);
+    await auditRepository.assertReady();
+    const lifecycleRepository = new PostgresLifecycleRepository(pool);
+    await lifecycleRepository.assertReady();
 
     const oidc = await createOpenIdClientGateway(config.oidc);
     const authService = new AuthService({
@@ -48,12 +56,23 @@ export async function createRuntimeApp() {
       relationships: authorizationGateway,
       context: policyContextRepository,
       policy: contextualPolicyGateway,
+      audit: auditRepository,
     });
     const productService = new ProductService({
       repository: productRepository,
       decisions: authorizationService,
       relationships: authorizationGateway,
     });
+    const lifecycleService = new LifecycleService({
+      repository: lifecycleRepository,
+      authorization: authorizationService,
+      memberships: productService,
+      audit: auditRepository,
+    });
+    const auditService = new AuditService(
+      auditRepository,
+      authorizationService,
+    );
 
     /**
      * A previous process may have stopped after PostgreSQL stored a mutation or
@@ -73,6 +92,8 @@ export async function createRuntimeApp() {
       authService,
       authorizationService,
       productService,
+      lifecycleService,
+      auditService,
       config,
     });
 

@@ -13,6 +13,7 @@ interface PlatformContextRow {
 interface OrganizationContextRow extends PlatformContextRow {
   organization_id: string;
   organization_status: PolicyStatus;
+  subject_organization_status: PolicyStatus;
 }
 
 /**
@@ -30,14 +31,14 @@ export class PostgresPolicyContextRepository implements PolicyContextRepository 
         SELECT EXISTS (
           SELECT 1
           FROM schema_migrations
-          WHERE version = '003_contextual_authorization_status'
+          WHERE version = '004_enterprise_lifecycle_audit'
         ) AS present
       `,
     );
 
     if (result.rows[0]?.present !== true) {
       throw new Error(
-        "The contextual authorization migration is missing; run pnpm infra:db:migrate",
+        "The enterprise lifecycle migration is missing; run pnpm infra:db:migrate",
       );
     }
   }
@@ -68,9 +69,13 @@ export class PostgresPolicyContextRepository implements PolicyContextRepository 
         SELECT
           users.account_status AS subject_status,
           organizations.id AS organization_id,
-          organizations.tenant_status AS organization_status
+          organizations.tenant_status AS organization_status,
+          COALESCE(lifecycle.status, 'active') AS subject_organization_status
         FROM product_users AS users
         CROSS JOIN organizations
+        LEFT JOIN organization_user_lifecycle AS lifecycle
+          ON lifecycle.organization_id = organizations.id
+         AND lifecycle.user_id = users.id
         WHERE users.id = $1
           AND organizations.id = $2
           AND organizations.authorization_state = 'active'
@@ -89,10 +94,14 @@ export class PostgresPolicyContextRepository implements PolicyContextRepository 
         SELECT
           users.account_status AS subject_status,
           organizations.id AS organization_id,
-          organizations.tenant_status AS organization_status
+          organizations.tenant_status AS organization_status,
+          COALESCE(lifecycle.status, 'active') AS subject_organization_status
         FROM product_users AS users
         CROSS JOIN teams
         INNER JOIN organizations ON organizations.id = teams.organization_id
+        LEFT JOIN organization_user_lifecycle AS lifecycle
+          ON lifecycle.organization_id = organizations.id
+         AND lifecycle.user_id = users.id
         WHERE users.id = $1
           AND teams.id = $2
           AND teams.authorization_state = 'active'
@@ -112,10 +121,14 @@ export class PostgresPolicyContextRepository implements PolicyContextRepository 
         SELECT
           users.account_status AS subject_status,
           organizations.id AS organization_id,
-          organizations.tenant_status AS organization_status
+          organizations.tenant_status AS organization_status,
+          COALESCE(lifecycle.status, 'active') AS subject_organization_status
         FROM product_users AS users
         CROSS JOIN workbooks
         INNER JOIN organizations ON organizations.id = workbooks.organization_id
+        LEFT JOIN organization_user_lifecycle AS lifecycle
+          ON lifecycle.organization_id = organizations.id
+         AND lifecycle.user_id = users.id
         WHERE users.id = $1
           AND workbooks.id = $2
           AND workbooks.authorization_state = 'active'
@@ -138,7 +151,11 @@ export class PostgresPolicyContextRepository implements PolicyContextRepository 
 
     return row
       ? {
-          subject: { id: userId, status: row.subject_status },
+          subject: {
+            id: userId,
+            status: row.subject_status,
+            organizationStatus: row.subject_organization_status,
+          },
           organization: {
             id: row.organization_id,
             status: row.organization_status,

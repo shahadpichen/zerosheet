@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AuthorizationService } from "./authorization-service.js";
+import type { AuditEventInput, AuditRecorder } from "../audit/types.js";
 import type {
   AuthorizationGateway,
   ContextualPolicyGateway,
@@ -50,7 +51,11 @@ class FakeContextRepository implements PolicyContextRepository {
     subject: { id: userId, status: "active" },
   };
   public resource: OrganizationPolicyContext | null = {
-    subject: { id: userId, status: "active" },
+    subject: {
+      id: userId,
+      status: "active",
+      organizationStatus: "active",
+    },
     organization: { id: organizationId, status: "active" },
   };
 
@@ -95,12 +100,31 @@ class FakeContextualPolicy implements ContextualPolicyGateway {
   }
 }
 
+class FakeAuditRecorder implements AuditRecorder {
+  public events: AuditEventInput[] = [];
+
+  public assertReady(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  public record(event: AuditEventInput): Promise<void> {
+    this.events.push(event);
+    return Promise.resolve();
+  }
+}
+
 function makeService() {
   const relationships = new FakeRelationshipGateway();
   const context = new FakeContextRepository();
   const policy = new FakeContextualPolicy();
-  const service = new AuthorizationService({ relationships, context, policy });
-  return { service, relationships, context, policy };
+  const audit = new FakeAuditRecorder();
+  const service = new AuthorizationService({
+    relationships,
+    context,
+    policy,
+    audit,
+  });
+  return { service, relationships, context, policy, audit };
 }
 
 describe("AuthorizationService decision composition", () => {
@@ -163,7 +187,11 @@ describe("AuthorizationService decision composition", () => {
     ).resolves.toBe(true);
 
     expect(policy.inputs[0]).toEqual({
-      subject: { id: userId, status: "active" },
+      subject: {
+        id: userId,
+        status: "active",
+        organizationStatus: "active",
+      },
       organization: { id: organizationId, status: "active" },
       resource: { type: "workbook", id: workbookId },
       action: "can_manage_sharing",

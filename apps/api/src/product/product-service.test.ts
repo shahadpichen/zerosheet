@@ -352,6 +352,50 @@ describe("ProductService relationship lifecycle", () => {
     });
   });
 
+  it("provisions a SCIM-managed member through the normal outbox without impersonating a user", async () => {
+    const { service, repository, authorization } = serviceWith();
+
+    await service.provisionManagedOrganizationMember(
+      organizationId,
+      targetUserId,
+    );
+
+    expect(authorization.organizationCheck).toBeUndefined();
+    expect(authorization.mutations[0]).toMatchObject({
+      writes: [
+        {
+          user: `user:${targetUserId}`,
+          relation: "member",
+          object: `organization:${organizationId}`,
+        },
+      ],
+    });
+    expect(repository.completedOperations).toEqual([
+      { id: organizationId, at: now },
+    ]);
+  });
+
+  it("deprovisions a SCIM-managed member through the normal outbox", async () => {
+    const { service, authorization } = serviceWith();
+
+    await service.deprovisionManagedOrganizationMember(
+      organizationId,
+      targetUserId,
+    );
+
+    expect(authorization.organizationCheck).toBeUndefined();
+    expect(authorization.mutations[0]).toMatchObject({
+      writes: [],
+      deletes: [
+        {
+          user: `user:${targetUserId}`,
+          relation: "member",
+          object: `organization:${organizationId}`,
+        },
+      ],
+    });
+  });
+
   it("checks sharing administration before creating a team userset share", async () => {
     const { service, authorization } = serviceWith();
 

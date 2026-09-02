@@ -5,10 +5,14 @@ import Fastify, {
   type FastifyServerOptions,
 } from "fastify";
 import type { RuntimeConfig } from "./config.js";
+import { registerAuditRoutes } from "./audit/routes.js";
+import type { AuditApplicationService } from "./audit/types.js";
 import { registerAuthRoutes } from "./auth/routes.js";
 import type { AuthApplicationService } from "./auth/types.js";
 import { registerAuthorizationRoutes } from "./authorization/routes.js";
 import type { AuthorizationApplicationService } from "./authorization/types.js";
+import { registerLifecycleRoutes } from "./lifecycle/routes.js";
+import type { LifecycleApplicationService } from "./lifecycle/types.js";
 import { registerProductRoutes } from "./product/routes.js";
 import type { ProductApplicationService } from "./product/types.js";
 
@@ -16,6 +20,8 @@ export interface BuildAppOptions {
   authService: AuthApplicationService;
   authorizationService: AuthorizationApplicationService;
   productService: ProductApplicationService;
+  lifecycleService: LifecycleApplicationService;
+  auditService: AuditApplicationService;
   config: RuntimeConfig;
   logger?: boolean;
 }
@@ -50,6 +56,18 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
           },
   };
   const app: FastifyInstance = Fastify(serverOptions);
+
+  /**
+   * SCIM clients use `application/scim+json`, not generic application/json.
+   * Reusing Fastify's hardened default JSON parser preserves its prototype-
+   * poisoning checks and body-size enforcement while making the standards-
+   * registered media type behave exactly like JSON at the route boundary.
+   */
+  app.addContentTypeParser(
+    "application/scim+json",
+    { parseAs: "string" },
+    app.getDefaultJsonParser("ignore", "ignore"),
+  );
 
   // Cookie parsing must run before authentication handlers read request.cookies.
   void app.register(cookie);
@@ -100,6 +118,31 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
     registerProductRoutes(productScope, {
       authentication: options.authService,
       product: options.productService,
+      cookies: options.config.authCookies,
+    });
+    done();
+  });
+
+  /**
+   * Lifecycle routes contain two distinct authentication surfaces. Creating a
+   * SCIM connection uses the human administrator's opaque session; `/scim/v2`
+   * uses only the generated tenant-bound provisioning credential. Registering
+   * both through one reviewed plugin makes that distinction explicit.
+   */
+  void app.register((lifecycleScope, _pluginOptions, done) => {
+    registerLifecycleRoutes(lifecycleScope, {
+      authentication: options.authService,
+      lifecycle: options.lifecycleService,
+      cookies: options.config.authCookies,
+      scimBaseUrl: new URL("/scim/v2/", options.config.oidc.callbackUrl),
+    });
+    done();
+  });
+
+  void app.register((auditScope, _pluginOptions, done) => {
+    registerAuditRoutes(auditScope, {
+      authentication: options.authService,
+      audit: options.auditService,
       cookies: options.config.authCookies,
     });
     done();

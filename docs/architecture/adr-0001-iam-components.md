@@ -16,4 +16,9 @@ Authentication proves who is making a request. Authorization decides what that p
 - ZeroSheet integrates with one OIDC issuer even when organizations use different upstream providers.
 - Application permissions are checked at request time instead of copied into long-lived tokens.
 - Existing-resource actions require OpenFGA and OPA to agree; PostgreSQL supplies current lifecycle facts as the PIP.
+- Enterprise directories provision tenant lifecycle through a bounded SCIM
+  User service; they do not become the interactive OIDC issuer or write raw
+  OpenFGA relationships.
+- Security decisions and lifecycle transitions append tenant-scoped audit
+  evidence that is exported only after a composed administration decision.
 - The deployment has more services, so local labs and the 2 GB staging VPS use Compose profiles.

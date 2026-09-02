@@ -4,7 +4,7 @@ package zerosheet.authz
 
 import rego.v1
 
-active_subject := {"id": "user-1", "status": "active"}
+active_subject := {"id": "user-1", "status": "active", "organizationStatus": "active"}
 active_organization := {"id": "organization-1", "status": "active"}
 active_relationship := {"required": true, "allowed": true}
 
@@ -56,6 +56,16 @@ test_suspended_user_overrides_openfga_allow if {
   }
 }
 
+test_suspended_tenant_membership_overrides_openfga_allow if {
+  not allow with input as {
+    "subject": {"id": "user-1", "status": "active", "organizationStatus": "suspended"},
+    "organization": active_organization,
+    "resource": {"type": "workbook", "id": "workbook-1"},
+    "action": "can_view",
+    "relationship": active_relationship,
+  }
+}
+
 test_suspended_tenant_overrides_openfga_allow if {
   not allow with input as {
     "subject": active_subject,
@@ -82,7 +92,7 @@ test_missing_input_is_denied if {
 
 test_missing_identifiers_are_denied if {
   not allow with input as {
-    "subject": {"status": "active"},
+    "subject": {"status": "active", "organizationStatus": "active"},
     "organization": active_organization,
     "resource": {"type": "workbook"},
     "action": "can_view",

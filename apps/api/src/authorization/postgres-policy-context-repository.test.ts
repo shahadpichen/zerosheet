@@ -15,7 +15,7 @@ describe("PostgresPolicyContextRepository", () => {
     const { repository } = repositoryReturning([{ present: false }]);
 
     await expect(repository.assertReady()).rejects.toThrow(
-      /contextual authorization migration/u,
+      /enterprise lifecycle migration/u,
     );
   });
 
@@ -39,13 +39,18 @@ describe("PostgresPolicyContextRepository", () => {
         subject_status: "active",
         organization_id: "organization-1",
         organization_status: "suspended",
+        subject_organization_status: "active",
       },
     ]);
 
     await expect(
       repository.findWorkbookContext("user-1", "workbook-1"),
     ).resolves.toEqual({
-      subject: { id: "user-1", status: "active" },
+      subject: {
+        id: "user-1",
+        status: "active",
+        organizationStatus: "active",
+      },
       organization: { id: "organization-1", status: "suspended" },
     });
     expect(query.mock.calls[0]?.[0]).toContain(

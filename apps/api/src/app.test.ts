@@ -7,10 +7,17 @@ import type {
 } from "./auth/types.js";
 import { buildApp } from "./app.js";
 import type { RuntimeConfig } from "./config.js";
+import type { AuditApplicationService } from "./audit/types.js";
 import type {
   AuthorizationApplicationService,
   CheckWorkbookPermissionInput,
 } from "./authorization/types.js";
+import type {
+  LifecycleApplicationService,
+  ScimConnection,
+  ScimManagedUser,
+} from "./lifecycle/types.js";
+import { LifecycleUnauthorizedError } from "./lifecycle/errors.js";
 import type {
   Organization,
   OrganizationMembership,
@@ -203,6 +210,104 @@ class FakeProductService implements ProductApplicationService {
   }
 }
 
+class FakeLifecycleService implements LifecycleApplicationService {
+  public authenticated = true;
+  public createInput:
+    | {
+        externalId: string;
+        userName: string;
+        displayName: string;
+        active: boolean;
+      }
+    | undefined;
+  public replaceInput:
+    | {
+        externalId: string;
+        userName: string;
+        displayName: string;
+        active: boolean;
+      }
+    | undefined;
+  private readonly connection: ScimConnection = {
+    id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    organizationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    displayName: "Test directory",
+    active: true,
+  };
+  private readonly user: ScimManagedUser = {
+    id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+    connectionId: this.connection.id,
+    organizationId: this.connection.organizationId,
+    productUserId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+    externalId: "directory-user-1",
+    userName: "directory@zerosheet.local",
+    displayName: "Directory User",
+    active: true,
+    version: 1,
+    createdAt: new Date("2026-09-03T00:00:00.000Z"),
+    updatedAt: new Date("2026-09-03T00:00:00.000Z"),
+  };
+
+  public createConnection() {
+    return Promise.resolve({
+      ...this.connection,
+      bearerToken: "zs_scim_test.token",
+      tokenHint: "st.token",
+    });
+  }
+
+  public authenticateConnection() {
+    return this.authenticated
+      ? Promise.resolve(this.connection)
+      : Promise.reject(new LifecycleUnauthorizedError());
+  }
+
+  public createUser(
+    _connection: ScimConnection,
+    input: {
+      externalId: string;
+      userName: string;
+      displayName: string;
+      active: boolean;
+    },
+  ) {
+    this.createInput = input;
+    return Promise.resolve(this.user);
+  }
+
+  public replaceUser(
+    _connection: ScimConnection,
+    _id: string,
+    input: {
+      externalId: string;
+      userName: string;
+      displayName: string;
+      active: boolean;
+    },
+  ) {
+    this.replaceInput = input;
+    return Promise.resolve(this.user);
+  }
+
+  public findUser() {
+    return Promise.resolve(this.user);
+  }
+
+  public listUsers() {
+    return Promise.resolve([this.user]);
+  }
+
+  public deactivateUser(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+class FakeAuditService implements AuditApplicationService {
+  public listOrganizationEvents() {
+    return Promise.resolve([]);
+  }
+}
+
 function testConfig(): RuntimeConfig {
   return {
     host: "127.0.0.1",
@@ -253,18 +358,24 @@ function makeApp(
   service = new FakeAuthService(),
   authorizationService = new FakeAuthorizationService(),
   productService = new FakeProductService(),
+  lifecycleService = new FakeLifecycleService(),
+  auditService = new FakeAuditService(),
 ) {
   return {
     app: buildApp({
       authService: service,
       authorizationService,
       productService,
+      lifecycleService,
+      auditService,
       config: testConfig(),
       logger: false,
     }),
     service,
     authorizationService,
     productService,
+    lifecycleService,
+    auditService,
   };
 }
 
@@ -600,5 +711,145 @@ describe("ZeroSheet HTTP authentication boundary", () => {
       type: "team",
       id: productService.team.id,
     });
+  });
+});
+
+describe("ZeroSheet SCIM lifecycle boundary", () => {
+  it("publishes honest discovery metadata without claiming Group support", async () => {
+    const { app } = makeApp();
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/scim/v2/ResourceTypes",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("application/scim+json");
+    const resourceTypes = response.json<{
+      Resources: Array<{ endpoint: string }>;
+    }>();
+    expect(resourceTypes.Resources).toHaveLength(1);
+    expect(resourceTypes.Resources[0]?.endpoint).toBe("/Users");
+
+    /**
+     * ResourceTypes points clients at the schema URN, so the matching schema
+     * discovery endpoint must describe only attributes the service accepts.
+     */
+    const schemas = await app.inject({
+      method: "GET",
+      url: "/scim/v2/Schemas",
+    });
+    expect(schemas.statusCode).toBe(200);
+    const schemaList = schemas.json<{ Resources: Array<{ id: string }> }>();
+    expect(schemaList.Resources).toHaveLength(1);
+    expect(schemaList.Resources[0]?.id).toBe(
+      "urn:ietf:params:scim:schemas:core:2.0:User",
+    );
+  });
+
+  it("requires a tenant provisioning bearer credential for SCIM Users", async () => {
+    const lifecycle = new FakeLifecycleService();
+    lifecycle.authenticated = false;
+    const { app } = makeApp(
+      new FakeAuthService(),
+      new FakeAuthorizationService(),
+      new FakeProductService(),
+      lifecycle,
+    );
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/scim/v2/Users",
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.headers["www-authenticate"]).toContain("Bearer");
+    expect(response.json()).toMatchObject({
+      schemas: ["urn:ietf:params:scim:api:messages:2.0:Error"],
+      status: "401",
+    });
+  });
+
+  it("normalizes a valid SCIM User and returns an ETag and location", async () => {
+    const lifecycle = new FakeLifecycleService();
+    const { app } = makeApp(
+      new FakeAuthService(),
+      new FakeAuthorizationService(),
+      new FakeProductService(),
+      lifecycle,
+    );
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/scim/v2/Users",
+      headers: {
+        authorization: "Bearer zs_scim_test.token",
+        "content-type": "application/scim+json",
+      },
+      payload: {
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+        externalId: "directory-user-1",
+        userName: "directory@zerosheet.local",
+        displayName: "Directory User",
+        active: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.headers.etag).toBe('W/"1"');
+    expect(response.headers.location).toContain("/scim/v2/Users/");
+    expect(lifecycle.createInput).toMatchObject({
+      externalId: "directory-user-1",
+      active: true,
+    });
+  });
+
+  it("rejects unimplemented filters with the SCIM invalidFilter category", async () => {
+    const { app } = makeApp();
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: '/scim/v2/Users?filter=department%20eq%20"Finance"',
+      headers: { authorization: "Bearer zs_scim_test.token" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json<{ scimType: string }>().scimType).toBe(
+      "invalidFilter",
+    );
+  });
+
+  it("rejects unknown path-less PATCH attributes instead of silently ignoring them", async () => {
+    const lifecycle = new FakeLifecycleService();
+    const { app } = makeApp(
+      new FakeAuthService(),
+      new FakeAuthorizationService(),
+      new FakeProductService(),
+      lifecycle,
+    );
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/scim/v2/Users/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      headers: { authorization: "Bearer zs_scim_test.token" },
+      payload: {
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        Operations: [
+          {
+            op: "replace",
+            value: { department: "Finance" },
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json<{ scimType: string }>().scimType).toBe("invalidValue");
+    expect(lifecycle.replaceInput).toBeUndefined();
   });
 });

@@ -59,7 +59,15 @@ export interface PlatformPolicyContext {
   };
 }
 
-export interface OrganizationPolicyContext extends PlatformPolicyContext {
+export interface OrganizationPolicyContext {
+  subject: PlatformPolicyContext["subject"] & {
+    /**
+     * This is the user's status inside the resource's tenant. It is separate
+     * from global account status so one enterprise can offboard a consultant
+     * without disabling that person's unrelated organizations.
+     */
+    organizationStatus: PolicyStatus;
+  };
   organization: {
     id: string;
     status: PolicyStatus;
@@ -94,7 +102,8 @@ export interface PolicyContextRepository {
  * exists yet, from resource actions that must have an OpenFGA allow.
  */
 export interface ContextualPolicyInput {
-  subject: PlatformPolicyContext["subject"];
+  subject:
+    PlatformPolicyContext["subject"] | OrganizationPolicyContext["subject"];
   organization?: OrganizationPolicyContext["organization"];
   resource: {
     type: PolicyResourceType;

@@ -4,6 +4,7 @@ import type {
   AuthorizationApplicationService,
   AuthorizationGateway,
 } from "../authorization/types.js";
+import type { ManagedMembershipCoordinator } from "../lifecycle/types.js";
 import {
   ProductDependencyError,
   ProductForbiddenError,
@@ -57,7 +58,9 @@ export interface ProductServiceOptions {
  * The ordering is deliberate: authorize the trusted session principal, stage
  * a durable intent, apply it idempotently, then expose the activated resource.
  */
-export class ProductService implements ProductApplicationService {
+export class ProductService
+  implements ProductApplicationService, ManagedMembershipCoordinator
+{
   private readonly repository: ProductRepository;
   private readonly decisions: AuthorizationApplicationService;
   private readonly relationships: AuthorizationGateway;
@@ -229,6 +232,55 @@ export class ProductService implements ProductApplicationService {
       userId,
       { operationId: this.id(), now: this.now() },
     );
+    await this.applyStaged(staged);
+  }
+
+  /**
+   * SCIM is an authenticated provisioning workload, not a human user. These
+   * two internal methods deliberately skip the browser-user authorization
+   * check because LifecycleService already authenticated the tenant-bound
+   * connection. They still use the exact transactional outbox and tuple
+   * builders as a human membership change, so there is no privileged raw-write
+   * bypass around OpenFGA consistency.
+   */
+  public async provisionManagedOrganizationMember(
+    organizationId: string,
+    userId: string,
+  ): Promise<void> {
+    const staged = await this.repository.setOrganizationMembership({
+      organizationId,
+      userId,
+      role: "member",
+      operationId: this.id(),
+      now: this.now(),
+      buildMutation: (previousRole) =>
+        organizationMembershipMutation(
+          organizationId,
+          userId,
+          previousRole,
+          "member",
+        ),
+    });
+    await this.applyStaged(staged);
+  }
+
+  public async deprovisionManagedOrganizationMember(
+    organizationId: string,
+    userId: string,
+  ): Promise<void> {
+    let staged: StagedMutation<OrganizationMembership>;
+    try {
+      staged = await this.repository.removeOrganizationMembership(
+        organizationId,
+        userId,
+        { operationId: this.id(), now: this.now() },
+      );
+    } catch (error) {
+      // Deactivating a user who was never active is an idempotent safe state.
+      // Other conflicts, especially immutable ownership, must remain visible.
+      if (error instanceof ProductNotFoundError) return;
+      throw error;
+    }
     await this.applyStaged(staged);
   }
 

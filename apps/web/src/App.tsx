@@ -55,12 +55,13 @@ export function App() {
 
   return (
     <main>
-      <p className="eyebrow">Milestone 6 · Contextual authorization</p>
-      <h1>Relationships and current context must agree.</h1>
+      <p className="eyebrow">Milestone 7 · Enterprise lifecycle</p>
+      <h1>Directory changes must become access changes.</h1>
       <p className="intro">
-        Keycloak establishes your ZeroSheet identity. OpenFGA decides durable
-        organization, team, and workbook relationships. OPA separately checks
-        current account and tenant policy before ZeroSheet permits an action.
+        Keycloak establishes identity. SCIM manages tenant joiners and leavers.
+        OpenFGA relationships and OPA lifecycle policy must still agree before
+        ZeroSheet permits an action, and security outcomes become audit
+        evidence.
       </p>
 
       <section className="session-card" aria-live="polite">
@@ -88,8 +89,9 @@ export function App() {
             <strong>{session.user.displayName}</strong>
             <span>{session.user.email}</span>
             <p className="authorization-note">
-              Your session proves who you are. Every protected action requires
-              the relevant OpenFGA relationship and current OPA policy to allow.
+              Your session proves who you are. A directory suspension revokes
+              it, removes tenant membership, and makes current OPA policy deny
+              even if another relationship has not yet been reconciled.
             </p>
 
             {/* A normal form navigation follows Keycloak's logout redirect.
@@ -119,7 +121,8 @@ export function App() {
 
       <p className="boundary-note">
         Browser: opaque HttpOnly cookie · API: session and policy enforcement ·
-        Keycloak: authentication · OpenFGA: relationships · OPA: context
+        Keycloak: authentication · SCIM: lifecycle · OpenFGA: relationships ·
+        OPA: context · PostgreSQL: audit evidence
       </p>
     </main>
   );

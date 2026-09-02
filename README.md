@@ -12,9 +12,10 @@ The product will combine:
 
 ## Current milestone
 
-Milestone 6 composes OpenFGA relationships with OPA contextual policy.
-PostgreSQL supplies current account and tenant status, and the API permits an
-action only when every required decision explicitly allows it.
+Milestone 7 adds tenant-scoped SCIM user lifecycle, immediate session
+revocation, OpenFGA membership reconciliation, and authorized append-only
+security audit export. Deactivation remains fail-closed even when an unrelated
+direct workbook share is still present.
 
 ## Repository layout
 
@@ -48,6 +49,7 @@ pnpm infra:authorization:provision
 pnpm infra:db:migrate
 pnpm infra:product:verify
 pnpm infra:contextual-authorization:verify
+pnpm infra:lifecycle:verify
 pnpm typecheck
 pnpm test
 pnpm dev
@@ -73,3 +75,7 @@ lifecycle are explained in
 OPA, PDP/PEP/PIP/PAP responsibilities, status-based denial, and decision
 composition are explained in
 [`docs/learning/06-opa-contextual-authorization.md`](docs/learning/06-opa-contextual-authorization.md).
+
+SCIM provisioning, tenant-scoped joiner/mover/leaver behavior, session
+revocation, strict identity linking, and audit evidence are explained in
+[`docs/learning/07-enterprise-lifecycle-scim-audit.md`](docs/learning/07-enterprise-lifecycle-scim-audit.md).
