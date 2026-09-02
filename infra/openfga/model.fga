@@ -1,0 +1,57 @@
+# ZeroSheet relationship-authorization model
+# ============================================
+#
+# This model describes product relationships only. It never stores passwords,
+# Google subjects, encryption keys, recovery phrases, cell data, or OAuth
+# tokens. Users are addressed by ZeroSheet's stable product-user UUID so a
+# provider change does not rewrite every authorization tuple.
+#
+# Organization administration intentionally does not imply workbook access.
+# An administrator can manage the tenant while encrypted workbook plaintext
+# remains available only to explicitly assigned owners, editors, and viewers.
+
+model
+  schema 1.1
+
+type user
+
+type organization
+  relations
+    # Owners are the highest organization administrators. The nesting below
+    # means an owner is also an admin and member without duplicating tuples.
+    define owner: [user]
+    define admin: [user] or owner
+    define member: [user] or admin
+
+    # Permissions are named after business actions. API routes ask permissions
+    # rather than interpreting raw roles, keeping policy inside the model.
+    define can_manage_members: admin
+    define can_create_workbook: member
+
+type team
+  relations
+    # This tuple provides the path used when organization administrators manage
+    # the team. It does not make those administrators team members.
+    define organization: [organization]
+    define manager: [user]
+    define member: [user] or manager
+    define can_manage: manager or admin from organization
+
+type workbook
+  relations
+    # Organization is product metadata and a future policy-information source.
+    # It deliberately grants no implicit read permission.
+    define organization: [organization]
+
+    # A team userset grants one workbook relationship to every current team
+    # member. Removing a member therefore revokes all inherited workbook access
+    # without finding and deleting one tuple per workbook.
+    define owner: [user]
+    define editor: [user, team#member] or owner
+    define viewer: [user, team#member] or editor
+
+    # These are the stable permission names used by the ZeroSheet PEP. Owners
+    # can share, editors can edit and view, and viewers can only view.
+    define can_view: viewer
+    define can_edit: editor
+    define can_manage_sharing: owner

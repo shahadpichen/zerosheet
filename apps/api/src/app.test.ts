@@ -7,6 +7,10 @@ import type {
 } from "./auth/types.js";
 import { buildApp } from "./app.js";
 import type { RuntimeConfig } from "./config.js";
+import type {
+  AuthorizationApplicationService,
+  CheckWorkbookPermissionInput,
+} from "./authorization/types.js";
 
 const testUser: AuthenticatedUser = {
   id: "d19b70b8-d531-43ac-a734-12270ca484d3",
@@ -69,6 +73,22 @@ class FakeAuthService implements AuthApplicationService {
   }
 }
 
+class FakeAuthorizationService implements AuthorizationApplicationService {
+  public allowed = false;
+  public fail = false;
+  public input: CheckWorkbookPermissionInput | undefined;
+
+  public canAccessWorkbook(input: CheckWorkbookPermissionInput) {
+    this.input = input;
+
+    if (this.fail) {
+      return Promise.reject(new Error("decision service unavailable"));
+    }
+
+    return Promise.resolve(this.allowed);
+  }
+}
+
 function testConfig(): RuntimeConfig {
   return {
     host: "127.0.0.1",
@@ -91,6 +111,13 @@ function testConfig(): RuntimeConfig {
       callbackUrl: new URL("http://127.0.0.1:3001/auth/callback"),
       postLogoutRedirectUrl: new URL("http://127.0.0.1:5173/"),
     },
+    authorization: {
+      apiUrl: new URL("http://127.0.0.1:8082"),
+      allowInsecureHttp: true,
+      storeId: "01H00000000000000000000000",
+      authorizationModelId: "01H00000000000000000000001",
+      apiToken: "test-only-openfga-key",
+    },
     authLifetimes: {
       loginTransactionSeconds: 600,
       sessionSeconds: 28_800,
@@ -103,14 +130,19 @@ function testConfig(): RuntimeConfig {
   };
 }
 
-function makeApp(service = new FakeAuthService()) {
+function makeApp(
+  service = new FakeAuthService(),
+  authorizationService = new FakeAuthorizationService(),
+) {
   return {
     app: buildApp({
       authService: service,
+      authorizationService,
       config: testConfig(),
       logger: false,
     }),
     service,
+    authorizationService,
   };
 }
 
@@ -251,5 +283,83 @@ describe("ZeroSheet HTTP authentication boundary", () => {
     expect(response.headers.location).toContain("/openid-connect/logout");
     expect(response.headers["set-cookie"]).toContain("zerosheet_session=;");
     expect(service.loggedOutToken).toBe("opaque-browser-session");
+  });
+
+  it("requires authentication before asking for a workbook decision", async () => {
+    const authorizationService = new FakeAuthorizationService();
+    const { app } = makeApp(new FakeAuthService(), authorizationService);
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/workbooks/3d9a575e-aed9-4634-b9ea-3f00334df680/access",
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(authorizationService.input).toBeUndefined();
+  });
+
+  it("returns workbook access only after an explicit relationship allow", async () => {
+    const service = new FakeAuthService();
+    service.user = testUser;
+    const authorizationService = new FakeAuthorizationService();
+    authorizationService.allowed = true;
+    const { app } = makeApp(service, authorizationService);
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/workbooks/3d9a575e-aed9-4634-b9ea-3f00334df680/access",
+      cookies: { zerosheet_session: "opaque-browser-session" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      workbookId: "3d9a575e-aed9-4634-b9ea-3f00334df680",
+      permission: "can_view",
+      allowed: true,
+    });
+    expect(authorizationService.input).toEqual({
+      userId: testUser.id,
+      workbookId: "3d9a575e-aed9-4634-b9ea-3f00334df680",
+      permission: "can_view",
+    });
+  });
+
+  it("returns 403 without disclosing the missing relationship", async () => {
+    const service = new FakeAuthService();
+    service.user = testUser;
+    const { app } = makeApp(service, new FakeAuthorizationService());
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/workbooks/3d9a575e-aed9-4634-b9ea-3f00334df680/access",
+      cookies: { zerosheet_session: "opaque-browser-session" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({
+      error: "forbidden",
+      message: "You do not have permission to access this workbook.",
+    });
+  });
+
+  it("fails closed when the authorization decision service is unavailable", async () => {
+    const service = new FakeAuthService();
+    service.user = testUser;
+    const authorizationService = new FakeAuthorizationService();
+    authorizationService.fail = true;
+    const { app } = makeApp(service, authorizationService);
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/workbooks/3d9a575e-aed9-4634-b9ea-3f00334df680/access",
+      cookies: { zerosheet_session: "opaque-browser-session" },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.body).not.toContain('"allowed":true');
   });
 });

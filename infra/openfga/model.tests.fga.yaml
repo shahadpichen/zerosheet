@@ -1,0 +1,137 @@
+# OpenFGA runs these tests in an embedded decision engine, so model mistakes are
+# caught before a model is provisioned into the persistent local store. Both
+# allow and deny cases are required: a model that accidentally grants everyone
+# access can make positive-only tests look perfectly healthy.
+
+name: ZeroSheet organization, team, and workbook authorization
+model_file: ./model.fga
+
+tuples:
+  # Alice owns Acme and the budget workbook.
+  - user: user:alice
+    relation: owner
+    object: organization:acme
+  - user: user:alice
+    relation: owner
+    object: workbook:budget
+
+  # Oscar administers Acme but has no explicit workbook relationship.
+  - user: user:oscar
+    relation: admin
+    object: organization:acme
+
+  # Bob is an ordinary Acme member and belongs to the Finance team.
+  - user: user:bob
+    relation: member
+    object: organization:acme
+  - user: user:bob
+    relation: member
+    object: team:finance
+
+  # Erin manages Finance and therefore also counts as a team member.
+  - user: user:erin
+    relation: manager
+    object: team:finance
+
+  # Object-to-object tuples locate both the team and workbook in Acme.
+  - user: organization:acme
+    relation: organization
+    object: team:finance
+  - user: organization:acme
+    relation: organization
+    object: workbook:budget
+
+  # Every current Finance member can edit the budget workbook.
+  - user: team:finance#member
+    relation: editor
+    object: workbook:budget
+
+  # Carol demonstrates an explicit external read-only share.
+  - user: user:carol
+    relation: viewer
+    object: workbook:budget
+
+tests:
+  - name: organization roles derive business permissions
+    check:
+      - user: user:alice
+        object: organization:acme
+        assertions:
+          owner: true
+          admin: true
+          member: true
+          can_manage_members: true
+          can_create_workbook: true
+      - user: user:bob
+        object: organization:acme
+        assertions:
+          admin: false
+          member: true
+          can_manage_members: false
+          can_create_workbook: true
+      - user: user:carol
+        object: organization:acme
+        assertions:
+          member: false
+          can_create_workbook: false
+
+  - name: team membership and administration remain distinct
+    check:
+      - user: user:bob
+        object: team:finance
+        assertions:
+          member: true
+          can_manage: false
+      - user: user:erin
+        object: team:finance
+        assertions:
+          manager: true
+          member: true
+          can_manage: true
+      - user: user:oscar
+        object: team:finance
+        assertions:
+          member: false
+          can_manage: true
+
+  - name: workbook access supports owners teams and direct shares
+    check:
+      - user: user:alice
+        object: workbook:budget
+        assertions:
+          can_view: true
+          can_edit: true
+          can_manage_sharing: true
+      - user: user:bob
+        object: workbook:budget
+        assertions:
+          can_view: true
+          can_edit: true
+          can_manage_sharing: false
+      - user: user:erin
+        object: workbook:budget
+        assertions:
+          can_view: true
+          can_edit: true
+          can_manage_sharing: false
+      - user: user:carol
+        object: workbook:budget
+        assertions:
+          can_view: true
+          can_edit: false
+          can_manage_sharing: false
+
+  - name: tenant administration and membership do not reveal workbook data
+    check:
+      - user: user:oscar
+        object: workbook:budget
+        assertions:
+          can_view: false
+          can_edit: false
+          can_manage_sharing: false
+      - user: user:mallory
+        object: workbook:budget
+        assertions:
+          can_view: false
+          can_edit: false
+          can_manage_sharing: false

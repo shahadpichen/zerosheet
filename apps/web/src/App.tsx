@@ -55,12 +55,11 @@ export function App() {
 
   return (
     <main>
-      <p className="eyebrow">Milestone 3 · Google federation</p>
-      <h1>Identity stays behind the boundary.</h1>
+      <p className="eyebrow">Milestone 4 · OpenFGA authorization</p>
+      <h1>Identity proves who. Relationships decide what.</h1>
       <p className="intro">
-        Google can authenticate you through Keycloak. ZeroSheet trusts only the
-        identity Keycloak verifies and converts it into a short-lived,
-        server-side product session.
+        Keycloak establishes your ZeroSheet identity. OpenFGA separately decides
+        which organizations, teams, and workbooks that identity may access.
       </p>
 
       <section className="session-card" aria-live="polite">
@@ -87,6 +86,10 @@ export function App() {
             <p className="status">Authenticated ZeroSheet user</p>
             <strong>{session.user.displayName}</strong>
             <span>{session.user.email}</span>
+            <p className="authorization-note">
+              Your session proves who you are. Every workbook request still
+              requires an explicit relationship decision.
+            </p>
 
             {/* A normal form navigation follows Keycloak's logout redirect.
                 JavaScript fetch would follow it internally and hide the
@@ -115,7 +118,7 @@ export function App() {
 
       <p className="boundary-note">
         Browser: opaque HttpOnly cookie · API: session and policy enforcement ·
-        Keycloak: authentication
+        Keycloak: authentication · OpenFGA: relationship decisions
       </p>
     </main>
   );

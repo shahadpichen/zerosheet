@@ -12,9 +12,10 @@ The product will combine:
 
 ## Current milestone
 
-Milestone 3 adds Google as an upstream identity provider brokered by Keycloak.
-ZeroSheet still trusts only Keycloak's OIDC issuer, and Google login uses the
-same PKCE-protected BFF flow and opaque HttpOnly product session as local login.
+Milestone 4 adds OpenFGA relationship authorization and the first API Policy
+Enforcement Point. Authentication establishes a stable product user; every
+protected workbook request now requires a separate explicit authorization
+decision.
 
 ## Repository layout
 
@@ -43,6 +44,8 @@ infra/          Local and production infrastructure
 pnpm install
 pnpm infra:auth:up
 pnpm infra:federation:google:verify
+pnpm infra:authorization:up
+pnpm infra:authorization:provision
 pnpm infra:db:migrate
 pnpm typecheck
 pnpm test
@@ -58,3 +61,6 @@ credential values.
 Google federation starts disabled with placeholder credentials. Follow
 [`docs/learning/03-google-identity-federation.md`](docs/learning/03-google-identity-federation.md)
 to create a development Google OAuth client and enable interactive Google login.
+
+The OpenFGA model and all authorization concepts are explained in
+[`docs/learning/04-openfga-authorization-foundation.md`](docs/learning/04-openfga-authorization-foundation.md).

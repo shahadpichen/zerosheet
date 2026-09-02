@@ -72,6 +72,16 @@ h1 {
   color: #aab8c8;
 }
 
+/* Authentication status and authorization meaning are intentionally separate.
+   A signed-in user may still have no relationship with any given workbook. */
+.session-card .authorization-note {
+  max-width: 42ch;
+  margin: 10px 0 0;
+  color: #8fa2b6;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
 .session-card form {
   margin-top: 14px;
 }

@@ -24,11 +24,16 @@
     "infra:auth:logs": "docker compose --env-file .env --file infra/compose.yaml --profile auth-lab logs --follow postgres keycloak",
     "infra:auth:up": "docker compose --env-file .env --file infra/compose.yaml --profile auth-lab up --detach --wait",
     "infra:auth:verify": "bash infra/scripts/verify-auth-foundation.sh",
+    "infra:authorization:config": "docker compose --env-file .env --file infra/compose.yaml --profile auth-lab --profile authorization-lab config --quiet",
+    "infra:authorization:model:test": "bash infra/scripts/test-openfga-model.sh",
+    "infra:authorization:provision": "bash infra/scripts/provision-openfga-authorization.sh",
+    "infra:authorization:up": "docker compose --env-file .env --file infra/compose.yaml --profile auth-lab --profile authorization-lab up --detach --wait",
+    "infra:authorization:verify": "bash infra/scripts/verify-authorization-foundation.sh",
     "infra:oidc:verify": "bash infra/scripts/verify-oidc-bff.sh",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
     "prepare": "node .husky/install.mjs",
-    "test": "pnpm --recursive --if-present test",
+    "test": "pnpm --recursive --if-present test && pnpm infra:authorization:model:test",
     "typecheck": "pnpm --recursive --if-present typecheck"
   },
   "devDependencies": {

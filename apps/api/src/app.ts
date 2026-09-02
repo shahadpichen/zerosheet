@@ -7,9 +7,12 @@ import Fastify, {
 import type { RuntimeConfig } from "./config.js";
 import { registerAuthRoutes } from "./auth/routes.js";
 import type { AuthApplicationService } from "./auth/types.js";
+import { registerAuthorizationRoutes } from "./authorization/routes.js";
+import type { AuthorizationApplicationService } from "./authorization/types.js";
 
 export interface BuildAppOptions {
   authService: AuthApplicationService;
+  authorizationService: AuthorizationApplicationService;
   config: RuntimeConfig;
   logger?: boolean;
 }
@@ -67,6 +70,20 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
       lifetimes: options.config.authLifetimes,
       successfulLoginRedirectUrl: options.config.webUrl,
       callbackUrl: options.config.oidc.callbackUrl,
+    });
+    done();
+  });
+
+  /**
+   * Protected product routes receive both the authenticated session boundary
+   * and the authorization decision boundary. Registering them together makes
+   * it difficult to accidentally expose a workbook route that checks neither.
+   */
+  void app.register((authorizationScope, _pluginOptions, done) => {
+    registerAuthorizationRoutes(authorizationScope, {
+      authentication: options.authService,
+      authorization: options.authorizationService,
+      cookies: options.config.authCookies,
     });
     done();
   });

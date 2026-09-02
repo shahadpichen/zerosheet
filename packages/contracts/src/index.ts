@@ -46,8 +46,39 @@ export const AuthenticationErrorResponseSchema = z.object({
   message: z.string().min(1),
 });
 
+/**
+ * The first PEP route returns only a non-sensitive proof that authorization
+ * succeeded. Real workbook metadata and encrypted content arrive in later
+ * product milestones, but they will reuse this fixed permission boundary.
+ */
+export const WorkbookAccessResponseSchema = z.object({
+  workbookId: z.string().uuid(),
+  permission: z.literal("can_view"),
+  allowed: z.literal(true),
+});
+
+export const WorkbookParametersSchema = z.object({
+  workbookId: z.string().uuid(),
+});
+
+export const AuthorizationDeniedResponseSchema = z.object({
+  error: z.literal("forbidden"),
+  message: z.string().min(1),
+});
+
+export const InvalidWorkbookResponseSchema = z.object({
+  error: z.literal("invalid_workbook_id"),
+  message: z.string().min(1),
+});
+
 export type AuthenticatedUser = z.infer<typeof AuthenticatedUserSchema>;
 export type AuthSessionResponse = z.infer<typeof AuthSessionResponseSchema>;
 export type AuthenticationErrorResponse = z.infer<
   typeof AuthenticationErrorResponseSchema
+>;
+export type WorkbookAccessResponse = z.infer<
+  typeof WorkbookAccessResponseSchema
+>;
+export type AuthorizationDeniedResponse = z.infer<
+  typeof AuthorizationDeniedResponseSchema
 >;

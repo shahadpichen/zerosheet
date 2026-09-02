@@ -4,6 +4,8 @@ import { PostgresAuthRepository } from "./auth/postgres-auth-repository.js";
 import { buildApp } from "./app.js";
 import { loadRuntimeConfig } from "./config.js";
 import { createDatabasePool } from "./database.js";
+import { AuthorizationService } from "./authorization/authorization-service.js";
+import { createOpenFgaAuthorizationGateway } from "./authorization/openfga-authorization-gateway.js";
 
 /**
  * This composition root is the only place that chooses concrete adapters.
@@ -26,7 +28,12 @@ export async function createRuntimeApp() {
       oidc,
       lifetimes: config.authLifetimes,
     });
-    const app = buildApp({ authService, config });
+    const authorizationGateway = createOpenFgaAuthorizationGateway(
+      config.authorization,
+    );
+    await authorizationGateway.assertReady();
+    const authorizationService = new AuthorizationService(authorizationGateway);
+    const app = buildApp({ authService, authorizationService, config });
 
     // Fastify owns process lifecycle, so closing the app must also drain its
     // PostgreSQL connections. This matters during watch-mode restarts and

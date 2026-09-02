@@ -16,6 +16,10 @@ function validEnvironment(): NodeJS.ProcessEnv {
     ZEROSHEET_DB_PASSWORD: "test-only-password",
     KEYCLOAK_BFF_CLIENT_ID: "zerosheet-bff",
     KEYCLOAK_BFF_CLIENT_SECRET: "test-only-client-secret",
+    OPENFGA_API_URL: "http://127.0.0.1:8082",
+    OPENFGA_STORE_ID: "01H00000000000000000000000",
+    OPENFGA_AUTHORIZATION_MODEL_ID: "01H00000000000000000000001",
+    OPENFGA_PRESHARED_KEY: "test-only-openfga-key",
   };
 }
 
@@ -31,6 +35,12 @@ describe("loadRuntimeConfig", () => {
       secure: false,
       loginTransactionName: "zerosheet_oidc_transaction",
       sessionName: "zerosheet_session",
+    });
+    expect(config.authorization).toMatchObject({
+      apiUrl: new URL("http://127.0.0.1:8082"),
+      allowInsecureHttp: true,
+      storeId: "01H00000000000000000000000",
+      authorizationModelId: "01H00000000000000000000001",
     });
   });
 
@@ -72,5 +82,23 @@ describe("loadRuntimeConfig", () => {
     expect(() => loadRuntimeConfig(environment)).toThrow(
       /KEYCLOAK_BFF_CLIENT_SECRET/u,
     );
+  });
+
+  it("refuses a non-loopback insecure authorization decision service", () => {
+    expect(() =>
+      loadRuntimeConfig({
+        ...validEnvironment(),
+        OPENFGA_API_URL: "http://authorization.internal:8080",
+      }),
+    ).toThrow(/OPENFGA_API_URL must use HTTPS/u);
+  });
+
+  it("requires a provisioned immutable authorization model ID", () => {
+    expect(() =>
+      loadRuntimeConfig({
+        ...validEnvironment(),
+        OPENFGA_AUTHORIZATION_MODEL_ID: "replace-me",
+      }),
+    ).toThrow(/infra:authorization:provision/u);
   });
 });

@@ -6,13 +6,14 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
-    "dev": "node --env-file-if-exists=../../.env --import=tsx --watch src/server.ts",
-    "start": "node --env-file-if-exists=../../.env dist/server.js",
+    "dev": "node --env-file-if-exists=../../.env --env-file-if-exists=../../.env.openfga --import=tsx --watch src/server.ts",
+    "start": "node --env-file-if-exists=../../.env --env-file-if-exists=../../.env.openfga dist/server.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",
+    "@openfga/sdk": "0.9.7",
     "@zerosheet/contracts": "workspace:*",
     "fastify": "^5.0.0",
     "openid-client": "^6.8.7",

@@ -2,15 +2,15 @@
 
 Infrastructure is introduced incrementally so each IAM service can be studied independently. The comments in `compose.yaml` are intentionally detailed because container networking, secrets, persistence, and health checks form part of the IAM trust model.
 
-## Available profile
+## Available profiles
 
 - `auth-lab`: PostgreSQL and Keycloak.
+- `authorization-lab`: PostgreSQL and OpenFGA's migration/server services.
 
 PostgreSQL has no profile so Docker Compose can treat it as the shared datastore dependency. Selecting `auth-lab` adds Keycloak and waits for PostgreSQL health before starting it.
 
 ## Planned profiles
 
-- `authorization-lab`: PostgreSQL, OpenFGA, OPA, API, and Caddy.
 - `governance-lab`: PostgreSQL, OpenFGA, OPA, API, and worker.
 - `integrated-test`: the complete IAM stack for temporary end-to-end tests.
 
@@ -36,3 +36,10 @@ Google federation is disabled while `.env` contains placeholders. After real
 development credentials are added, set `GOOGLE_IDENTITY_PROVIDER_ENABLED=true`
 and rerun the verifier. With `pnpm dev` running, `pnpm infra:oidc:verify` also
 checks the live API-to-Keycloak redirect and the fixed Google broker hint.
+
+Milestone 4 starts both current profiles with `pnpm infra:authorization:up`.
+OpenFGA owns only the `openfga` database. The one-shot migration container must
+complete before the decision server starts, and its public host binding is
+loopback-only. `pnpm infra:authorization:model:test` validates policy without a
+server; `pnpm infra:authorization:provision` writes the tested model; and
+`pnpm infra:authorization:verify` checks the live API PEP.

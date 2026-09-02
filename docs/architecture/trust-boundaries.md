@@ -7,7 +7,7 @@ Browser
   -> Google / optional upstream authentication
   -> Keycloak broker / sole ZeroSheet OIDC issuer
   -> opaque HttpOnly ZeroSheet session
-  -> ZeroSheet API / BFF / future PEP
+  -> ZeroSheet API / BFF / PEP
       -> Keycloak / authentication
       -> OpenFGA / relationship authorization
       -> OPA / contextual authorization
@@ -29,3 +29,7 @@ Browser
    sign-in does not grant storage access.
 10. A Keycloak provider hint selects a reviewed login route but never bypasses
     first-login, account-linking, token validation, or product authorization.
+11. Organization administration does not imply workbook plaintext access;
+    workbook relationships are explicit and separately enforced.
+12. OpenFGA stores product-user/resource relationships only. An authorization
+    allow neither contains nor substitutes for a decryption-key envelope.
