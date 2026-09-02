@@ -12,7 +12,7 @@ The product will combine:
 
 ## Current milestone
 
-Milestone 0 establishes the monorepo, trust boundaries, and an intentionally unauthenticated health endpoint. Authentication is added only after the baseline is understood and tested.
+Milestone 1 adds the PostgreSQL and Keycloak identity foundation. Keycloak now owns authentication state and exposes the OIDC endpoints that the ZeroSheet API/BFF will consume in Milestone 2.
 
 ## Repository layout
 
