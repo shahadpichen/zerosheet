@@ -5,7 +5,9 @@ import { buildApp } from "./app.js";
 import { loadRuntimeConfig } from "./config.js";
 import { createDatabasePool } from "./database.js";
 import { AuthorizationService } from "./authorization/authorization-service.js";
+import { createOpaContextualPolicyGateway } from "./authorization/opa-contextual-policy-gateway.js";
 import { createOpenFgaAuthorizationGateway } from "./authorization/openfga-authorization-gateway.js";
+import { PostgresPolicyContextRepository } from "./authorization/postgres-policy-context-repository.js";
 import { PostgresProductRepository } from "./product/postgres-product-repository.js";
 import { ProductService } from "./product/product-service.js";
 
@@ -25,6 +27,8 @@ export async function createRuntimeApp() {
     await repository.assertReady();
     const productRepository = new PostgresProductRepository(pool);
     await productRepository.assertReady();
+    const policyContextRepository = new PostgresPolicyContextRepository(pool);
+    await policyContextRepository.assertReady();
 
     const oidc = await createOpenIdClientGateway(config.oidc);
     const authService = new AuthService({
@@ -36,10 +40,19 @@ export async function createRuntimeApp() {
       config.authorization,
     );
     await authorizationGateway.assertReady();
-    const authorizationService = new AuthorizationService(authorizationGateway);
+    const contextualPolicyGateway = createOpaContextualPolicyGateway(
+      config.contextualAuthorization,
+    );
+    await contextualPolicyGateway.assertReady();
+    const authorizationService = new AuthorizationService({
+      relationships: authorizationGateway,
+      context: policyContextRepository,
+      policy: contextualPolicyGateway,
+    });
     const productService = new ProductService({
       repository: productRepository,
-      authorization: authorizationGateway,
+      decisions: authorizationService,
+      relationships: authorizationGateway,
     });
 
     /**

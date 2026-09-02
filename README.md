@@ -12,9 +12,9 @@ The product will combine:
 
 ## Current milestone
 
-Milestone 5 adds the first product control plane. Authenticated users can create
-organizations, teams, and workbook metadata, while membership and sharing APIs
-coordinate PostgreSQL state with retryable OpenFGA relationship mutations.
+Milestone 6 composes OpenFGA relationships with OPA contextual policy.
+PostgreSQL supplies current account and tenant status, and the API permits an
+action only when every required decision explicitly allows it.
 
 ## Repository layout
 
@@ -47,6 +47,7 @@ pnpm infra:authorization:up
 pnpm infra:authorization:provision
 pnpm infra:db:migrate
 pnpm infra:product:verify
+pnpm infra:contextual-authorization:verify
 pnpm typecheck
 pnpm test
 pnpm dev
@@ -68,3 +69,7 @@ The OpenFGA model and all authorization concepts are explained in
 The transactional outbox, product APIs, joiner/mover/leaver rules, and sharing
 lifecycle are explained in
 [`docs/learning/05-product-authorization-lifecycle.md`](docs/learning/05-product-authorization-lifecycle.md).
+
+OPA, PDP/PEP/PIP/PAP responsibilities, status-based denial, and decision
+composition are explained in
+[`docs/learning/06-opa-contextual-authorization.md`](docs/learning/06-opa-contextual-authorization.md).

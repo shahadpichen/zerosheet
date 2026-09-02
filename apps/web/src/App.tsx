@@ -55,13 +55,12 @@ export function App() {
 
   return (
     <main>
-      <p className="eyebrow">Milestone 5 · Product lifecycle</p>
-      <h1>Relationships now follow real product changes.</h1>
+      <p className="eyebrow">Milestone 6 · Contextual authorization</p>
+      <h1>Relationships and current context must agree.</h1>
       <p className="intro">
-        Keycloak establishes your ZeroSheet identity. OpenFGA separately decides
-        which organizations, teams, and workbooks that identity may access.
-        ZeroSheet now creates and revokes those relationships through a durable
-        control plane.
+        Keycloak establishes your ZeroSheet identity. OpenFGA decides durable
+        organization, team, and workbook relationships. OPA separately checks
+        current account and tenant policy before ZeroSheet permits an action.
       </p>
 
       <section className="session-card" aria-live="polite">
@@ -89,9 +88,8 @@ export function App() {
             <strong>{session.user.displayName}</strong>
             <span>{session.user.email}</span>
             <p className="authorization-note">
-              Your session proves who you are. Product changes create durable
-              relationship intents, and every workbook request still requires an
-              explicit OpenFGA decision.
+              Your session proves who you are. Every protected action requires
+              the relevant OpenFGA relationship and current OPA policy to allow.
             </p>
 
             {/* A normal form navigation follows Keycloak's logout redirect.
@@ -121,7 +119,7 @@ export function App() {
 
       <p className="boundary-note">
         Browser: opaque HttpOnly cookie · API: session and policy enforcement ·
-        Keycloak: authentication · OpenFGA: relationship decisions
+        Keycloak: authentication · OpenFGA: relationships · OPA: context
       </p>
     </main>
   );

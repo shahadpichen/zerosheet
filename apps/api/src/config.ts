@@ -34,6 +34,12 @@ export interface AuthorizationConfig {
   apiToken: string;
 }
 
+export interface ContextualAuthorizationConfig {
+  apiUrl: URL;
+  allowInsecureHttp: boolean;
+  requestTimeoutMs: number;
+}
+
 export interface AuthLifetimeConfig {
   loginTransactionSeconds: number;
   sessionSeconds: number;
@@ -53,6 +59,7 @@ export interface RuntimeConfig {
   database: DatabaseConfig;
   oidc: OidcConfig;
   authorization: AuthorizationConfig;
+  contextualAuthorization: ContextualAuthorizationConfig;
   authLifetimes: AuthLifetimeConfig;
   authCookies: AuthCookieConfig;
 }
@@ -186,6 +193,7 @@ export function loadRuntimeConfig(
   const webUrl = urlValue(environment, "ZEROSHEET_WEB_URL");
   const issuerUrl = urlValue(environment, "ZEROSHEET_OIDC_ISSUER_URL");
   const openFgaApiUrl = urlValue(environment, "OPENFGA_API_URL");
+  const opaApiUrl = urlValue(environment, "OPA_API_URL");
   const names = cookieNames(secureCookies);
 
   if (
@@ -230,6 +238,22 @@ export function loadRuntimeConfig(
     );
   }
 
+  /**
+   * OPA receives account/tenant status and the OpenFGA decision, all of which
+   * are sensitive authorization metadata. Plain HTTP is therefore allowed
+   * only for the loopback-bound local lab, matching the OpenFGA boundary.
+   */
+  const allowInsecureOpaHttp =
+    nodeEnvironment !== "production" &&
+    opaApiUrl.protocol === "http:" &&
+    isLoopbackHostname(opaApiUrl.hostname);
+
+  if (opaApiUrl.protocol !== "https:" && !allowInsecureOpaHttp) {
+    throw new Error(
+      "OPA_API_URL must use HTTPS outside the local loopback development environment",
+    );
+  }
+
   return {
     host: environment.API_HOST?.trim() || "127.0.0.1",
     port: positiveInteger(environment, "API_PORT", 3001),
@@ -260,6 +284,15 @@ export function loadRuntimeConfig(
         "OPENFGA_AUTHORIZATION_MODEL_ID",
       ),
       apiToken: required(environment, "OPENFGA_PRESHARED_KEY"),
+    },
+    contextualAuthorization: {
+      apiUrl: opaApiUrl,
+      allowInsecureHttp: allowInsecureOpaHttp,
+      requestTimeoutMs: positiveInteger(
+        environment,
+        "OPA_REQUEST_TIMEOUT_MS",
+        5_000,
+      ),
     },
     authLifetimes: {
       loginTransactionSeconds: positiveInteger(

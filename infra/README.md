@@ -6,12 +6,14 @@ Infrastructure is introduced incrementally so each IAM service can be studied in
 
 - `auth-lab`: PostgreSQL and Keycloak.
 - `authorization-lab`: PostgreSQL and OpenFGA's migration/server services.
+- `contextual-authorization-lab`: stateless OPA with read-only ZeroSheet Rego
+  policy.
 
 PostgreSQL has no profile so Docker Compose can treat it as the shared datastore dependency. Selecting `auth-lab` adds Keycloak and waits for PostgreSQL health before starting it.
 
 ## Planned profiles
 
-- `governance-lab`: PostgreSQL, OpenFGA, OPA, API, and worker.
+- `governance-lab`: PostgreSQL, both PDPs, API, and worker.
 - `integrated-test`: the complete IAM stack for temporary end-to-end tests.
 
 ## Secret boundary
@@ -52,3 +54,9 @@ server; `pnpm infra:authorization:provision` writes the tested model; and
 Milestone 5 keeps those services and adds `pnpm infra:product:verify`. The live
 check performs product creation and revocation through the API, then proves the
 corresponding metadata and relationship intents converged.
+
+Milestone 6 makes `pnpm infra:authorization:up` start OPA alongside the existing
+services. `pnpm infra:contextual-authorization:policy:test` runs Rego tests in
+the pinned engine. After migration 003 and the API are running,
+`pnpm infra:contextual-authorization:verify` proves account/tenant suspension
+overrides an unchanged OpenFGA allow and that reactivation restores access.

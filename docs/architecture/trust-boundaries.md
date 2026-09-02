@@ -38,3 +38,9 @@ Browser
     that state.
 14. Organization-member removal also removes tenant team memberships so a
     leaver cannot retain a team-inherited workbook authorization path.
+15. Existing-resource actions require both an OpenFGA relationship allow and
+    an OPA contextual allow; either decision can deny but neither alone grants.
+16. PostgreSQL is the PIP for current account/tenant status. Missing context,
+    pending resource metadata, or an unavailable PDP fails closed.
+17. OPA receives only minimized identifiers, lifecycle status, the fixed
+    action/resource pair, and the OpenFGA result—never credentials or content.

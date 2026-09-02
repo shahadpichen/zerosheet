@@ -1,6 +1,7 @@
 import type { AuthenticatedUser } from "@zerosheet/contracts";
 import { describe, expect, it } from "vitest";
 import type {
+  AuthorizationApplicationService,
   AuthorizationGateway,
   CheckOrganizationPermissionInput,
   CheckTeamPermissionInput,
@@ -38,7 +39,9 @@ const workbookId = "55555555-5555-4555-8555-555555555555";
 const operationId = "66666666-6666-4666-8666-666666666666";
 const now = new Date("2026-09-02T10:00:00.000Z");
 
-class FakeAuthorizationGateway implements AuthorizationGateway {
+class FakeAuthorizationGateway
+  implements AuthorizationGateway, AuthorizationApplicationService
+{
   public allowed = true;
   public failDecision = false;
   public failMutation = false;
@@ -46,6 +49,22 @@ class FakeAuthorizationGateway implements AuthorizationGateway {
   public teamCheck: CheckTeamPermissionInput | undefined;
   public workbookCheck: CheckWorkbookPermissionInput | undefined;
   public mutations: RelationshipMutation[] = [];
+
+  public canCreateOrganization() {
+    return this.decision();
+  }
+
+  public canAccessOrganization(input: CheckOrganizationPermissionInput) {
+    return this.checkOrganizationPermission(input);
+  }
+
+  public canAccessTeam(input: CheckTeamPermissionInput) {
+    return this.checkTeamPermission(input);
+  }
+
+  public canAccessWorkbook(input: CheckWorkbookPermissionInput) {
+    return this.checkWorkbookPermission(input);
+  }
 
   public assertReady(): Promise<void> {
     return Promise.resolve();
@@ -257,7 +276,8 @@ function serviceWith(
   const ids = [organizationId, operationId];
   const service = new ProductService({
     repository,
-    authorization,
+    decisions: authorization,
+    relationships: authorization,
     now: () => now,
     id: () => ids.shift() ?? operationId,
   });

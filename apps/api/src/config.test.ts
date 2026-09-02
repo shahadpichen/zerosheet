@@ -20,6 +20,7 @@ function validEnvironment(): NodeJS.ProcessEnv {
     OPENFGA_STORE_ID: "01H00000000000000000000000",
     OPENFGA_AUTHORIZATION_MODEL_ID: "01H00000000000000000000001",
     OPENFGA_PRESHARED_KEY: "test-only-openfga-key",
+    OPA_API_URL: "http://127.0.0.1:8181",
   };
 }
 
@@ -41,6 +42,11 @@ describe("loadRuntimeConfig", () => {
       allowInsecureHttp: true,
       storeId: "01H00000000000000000000000",
       authorizationModelId: "01H00000000000000000000001",
+    });
+    expect(config.contextualAuthorization).toEqual({
+      apiUrl: new URL("http://127.0.0.1:8181"),
+      allowInsecureHttp: true,
+      requestTimeoutMs: 5_000,
     });
   });
 
@@ -91,6 +97,15 @@ describe("loadRuntimeConfig", () => {
         OPENFGA_API_URL: "http://authorization.internal:8080",
       }),
     ).toThrow(/OPENFGA_API_URL must use HTTPS/u);
+  });
+
+  it("refuses a non-loopback insecure contextual policy service", () => {
+    expect(() =>
+      loadRuntimeConfig({
+        ...validEnvironment(),
+        OPA_API_URL: "http://policy.internal:8181",
+      }),
+    ).toThrow(/OPA_API_URL must use HTTPS/u);
   });
 
   it("requires a provisioned immutable authorization model ID", () => {

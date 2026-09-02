@@ -94,6 +94,10 @@ class FakeAuthorizationService implements AuthorizationApplicationService {
   public fail = false;
   public input: CheckWorkbookPermissionInput | undefined;
 
+  public canCreateOrganization() {
+    return Promise.resolve(this.allowed);
+  }
+
   public canAccessWorkbook(input: CheckWorkbookPermissionInput) {
     this.input = input;
 
@@ -227,6 +231,11 @@ function testConfig(): RuntimeConfig {
       storeId: "01H00000000000000000000000",
       authorizationModelId: "01H00000000000000000000001",
       apiToken: "test-only-openfga-key",
+    },
+    contextualAuthorization: {
+      apiUrl: new URL("http://127.0.0.1:8181"),
+      allowInsecureHttp: true,
+      requestTimeoutMs: 5_000,
     },
     authLifetimes: {
       loginTransactionSeconds: 600,

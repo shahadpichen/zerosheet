@@ -1,33 +1,134 @@
 import type {
   AuthorizationApplicationService,
+  ContextualPolicyGateway,
   AuthorizationGateway,
+  CheckCreateOrganizationInput,
   CheckOrganizationPermissionInput,
   CheckTeamPermissionInput,
   CheckWorkbookPermissionInput,
+  OrganizationPolicyContext,
+  PolicyContextRepository,
 } from "./types.js";
 
+export interface AuthorizationServiceOptions {
+  relationships: AuthorizationGateway;
+  context: PolicyContextRepository;
+  policy: ContextualPolicyGateway;
+}
+
 /**
- * AuthorizationService is deliberately small in this milestone. Its value is
- * the boundary: HTTP routes depend on a product action, while the gateway owns
- * OpenFGA syntax and consistency. OPA context and key-envelope possession can
- * be composed here later without teaching routes about multiple PDPs.
+ * AuthorizationService is the application's composite Policy Decision Point.
+ * OpenFGA answers durable relationship questions, PostgreSQL supplies current
+ * lifecycle facts, and OPA evaluates the final rule. A protected action is
+ * allowed only when every required component explicitly allows it.
  */
 export class AuthorizationService implements AuthorizationApplicationService {
-  public constructor(private readonly gateway: AuthorizationGateway) {}
+  public constructor(private readonly options: AuthorizationServiceOptions) {}
 
-  public canAccessOrganization(
+  public async canCreateOrganization(
+    input: CheckCreateOrganizationInput,
+  ): Promise<boolean> {
+    const context = await this.options.context.findPlatformContext(
+      input.userId,
+    );
+
+    if (!context) {
+      return false;
+    }
+
+    return this.options.policy.evaluate({
+      ...context,
+      resource: { type: "platform", id: "zerosheet" },
+      action: "create_organization",
+      relationship: { required: false, allowed: false },
+    });
+  }
+
+  public async canAccessOrganization(
     input: CheckOrganizationPermissionInput,
   ): Promise<boolean> {
-    return this.gateway.checkOrganizationPermission(input);
+    const relationshipAllowed =
+      await this.options.relationships.checkOrganizationPermission(input);
+
+    if (!relationshipAllowed) {
+      // A relationship denial is final. Avoiding the later queries also keeps
+      // nonexistent-resource details from becoming an observable side channel.
+      return false;
+    }
+
+    const context = await this.options.context.findOrganizationContext(
+      input.userId,
+      input.organizationId,
+    );
+
+    return this.evaluateResource(
+      context,
+      { type: "organization", id: input.organizationId },
+      input.permission,
+    );
   }
 
-  public canAccessTeam(input: CheckTeamPermissionInput): Promise<boolean> {
-    return this.gateway.checkTeamPermission(input);
+  public async canAccessTeam(
+    input: CheckTeamPermissionInput,
+  ): Promise<boolean> {
+    const relationshipAllowed =
+      await this.options.relationships.checkTeamPermission(input);
+
+    if (!relationshipAllowed) {
+      return false;
+    }
+
+    const context = await this.options.context.findTeamContext(
+      input.userId,
+      input.teamId,
+    );
+
+    return this.evaluateResource(
+      context,
+      { type: "team", id: input.teamId },
+      input.permission,
+    );
   }
 
-  public canAccessWorkbook(
+  public async canAccessWorkbook(
     input: CheckWorkbookPermissionInput,
   ): Promise<boolean> {
-    return this.gateway.checkWorkbookPermission(input);
+    const relationshipAllowed =
+      await this.options.relationships.checkWorkbookPermission(input);
+
+    if (!relationshipAllowed) {
+      return false;
+    }
+
+    const context = await this.options.context.findWorkbookContext(
+      input.userId,
+      input.workbookId,
+    );
+
+    return this.evaluateResource(
+      context,
+      { type: "workbook", id: input.workbookId },
+      input.permission,
+    );
+  }
+
+  private evaluateResource(
+    context: OrganizationPolicyContext | null,
+    resource: { type: "organization" | "team" | "workbook"; id: string },
+    action:
+      | CheckOrganizationPermissionInput["permission"]
+      | CheckTeamPermissionInput["permission"]
+      | CheckWorkbookPermissionInput["permission"],
+  ): Promise<boolean> {
+    if (!context) {
+      return Promise.resolve(false);
+    }
+
+    return this.options.policy.evaluate({
+      ...context,
+      resource,
+      action,
+      relationship: { required: true, allowed: true },
+    });
   }
 }

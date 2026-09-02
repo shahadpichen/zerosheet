@@ -3,9 +3,9 @@
 # Verify the complete authentication-to-authorization enforcement path.
 #
 # Prerequisites: the authorization stack and API must be running. This script
-# creates two short-lived product sessions and one workbook-owner tuple, proves
-# allow and deny behavior through both OpenFGA and the API PEP, then removes all
-# verification state even when a check fails.
+# creates two short-lived product sessions and an active workbook through the
+# public API, proves allow and deny behavior through OpenFGA plus the composed
+# API PEP, then removes all verification state even when a check fails.
 
 set -euo pipefail
 
@@ -36,13 +36,18 @@ source "${environment_file}"
 source "${openfga_environment_file}"
 set +a
 
-allowed_user_id="11111111-1111-4111-8111-111111111111"
-denied_user_id="22222222-2222-4222-8222-222222222222"
-workbook_id="33333333-3333-4333-8333-333333333333"
-allowed_session_token="local-verifier-allowed-session-token"
-denied_session_token="local-verifier-denied-session-token"
+new_uuid() {
+  node --input-type=module --eval 'console.log(crypto.randomUUID())'
+}
+
+allowed_user_id="$(new_uuid)"
+denied_user_id="$(new_uuid)"
+allowed_session_token="authorization-allowed-$(new_uuid)"
+denied_session_token="authorization-denied-$(new_uuid)"
 allowed_selector_hash="$(printf '%s' "${allowed_session_token}" | shasum -a 256 | awk '{print $1}')"
 denied_selector_hash="$(printf '%s' "${denied_session_token}" | shasum -a 256 | awk '{print $1}')"
+organization_id=""
+workbook_id=""
 
 if [[ ! "${OPENFGA_STORE_ID}" =~ ^[0-9A-HJKMNP-TV-Z]{26}$ ]] ||
   [[ ! "${OPENFGA_AUTHORIZATION_MODEL_ID}" =~ ^[0-9A-HJKMNP-TV-Z]{26}$ ]] ||
@@ -74,26 +79,36 @@ openfga_write() {
     >/dev/null
 }
 
-owner_tuple="{\"user\":\"user:${allowed_user_id}\",\"relation\":\"owner\",\"object\":\"workbook:${workbook_id}\"}"
-
 cleanup() {
-  # Cleanup must never hide the original verifier failure. The IDs are reserved
-  # for this script, and deleting product users cascades to their test sessions.
+  # Cleanup must never hide the original verifier failure. Tuple deletion uses
+  # Ignore because an interrupted API request can leave only part of the graph.
   set +e
-  openfga_write "{\"authorization_model_id\":\"${OPENFGA_AUTHORIZATION_MODEL_ID}\",\"deletes\":{\"tuple_keys\":[${owner_tuple}]}}" 2>/dev/null
-  run_zerosheet_sql --command \
-    "DELETE FROM product_users WHERE id IN ('${allowed_user_id}', '${denied_user_id}');" \
-    >/dev/null 2>&1
+
+  if [[ -n "${organization_id}" ]]; then
+    tuple_keys=(
+      "{\"user\":\"user:${allowed_user_id}\",\"relation\":\"owner\",\"object\":\"organization:${organization_id}\"}"
+    )
+    if [[ -n "${workbook_id}" ]]; then
+      tuple_keys+=(
+        "{\"user\":\"organization:${organization_id}\",\"relation\":\"organization\",\"object\":\"workbook:${workbook_id}\"}"
+        "{\"user\":\"user:${allowed_user_id}\",\"relation\":\"owner\",\"object\":\"workbook:${workbook_id}\"}"
+      )
+    fi
+    tuple_json="$(IFS=,; echo "${tuple_keys[*]}")"
+    openfga_write "{\"authorization_model_id\":\"${OPENFGA_AUTHORIZATION_MODEL_ID}\",\"deletes\":{\"tuple_keys\":[${tuple_json}],\"on_missing\":\"ignore\"}}" 2>/dev/null
+  fi
+
+  run_zerosheet_sql --command "
+    DELETE FROM organizations WHERE id = NULLIF('${organization_id}', '')::uuid;
+    DELETE FROM relationship_outbox
+    WHERE writes::text LIKE '%${allowed_user_id}%'
+       OR deletes::text LIKE '%${allowed_user_id}%';
+    DELETE FROM product_users WHERE id IN ('${allowed_user_id}', '${denied_user_id}');
+  " >/dev/null 2>&1
   rm -rf -- "${verification_directory}"
 }
 
 trap cleanup EXIT
-
-# Remove a tuple left by an interrupted previous run. Missing-tuple errors are
-# expected and ignored only during this pre-cleanup step.
-openfga_write "{\"authorization_model_id\":\"${OPENFGA_AUTHORIZATION_MODEL_ID}\",\"deletes\":{\"tuple_keys\":[${owner_tuple}]}}" 2>/dev/null || true
-
-openfga_write "{\"authorization_model_id\":\"${OPENFGA_AUTHORIZATION_MODEL_ID}\",\"writes\":{\"tuple_keys\":[${owner_tuple}]}}"
 
 run_zerosheet_sql --command "
   INSERT INTO product_users (id, primary_email, display_name, created_at, updated_at)
@@ -111,6 +126,48 @@ run_zerosheet_sql --command "
         created_at = EXCLUDED.created_at,
         expires_at = EXCLUDED.expires_at;
 " >/dev/null
+
+json_id() {
+  node --input-type=module --eval '
+    import fs from "node:fs";
+    const body = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    if (typeof body.id !== "string") throw new Error("Response has no id");
+    process.stdout.write(body.id);
+  ' "$1"
+}
+
+# The PIP now requires active product metadata. Creating that metadata through
+# public APIs also proves organization creation and OpenFGA tuple provisioning
+# pass through the same PEP being verified.
+organization_status="$(curl --silent --show-error \
+  --output "${verification_directory}/organization.json" \
+  --write-out '%{http_code}' \
+  --request POST \
+  --header "Cookie: zerosheet_session=${allowed_session_token}" \
+  --header "Content-Type: application/json" \
+  --data '{"name":"Authorization Foundation"}' \
+  "${ZEROSHEET_API_URL}/organizations")"
+
+if [[ "${organization_status}" != "201" ]]; then
+  echo "FAIL: could not create active organization context (HTTP ${organization_status})." >&2
+  exit 1
+fi
+organization_id="$(json_id "${verification_directory}/organization.json")"
+
+workbook_status="$(curl --silent --show-error \
+  --output "${verification_directory}/workbook.json" \
+  --write-out '%{http_code}' \
+  --request POST \
+  --header "Cookie: zerosheet_session=${allowed_session_token}" \
+  --header "Content-Type: application/json" \
+  --data '{"name":"Authorization Workbook"}' \
+  "${ZEROSHEET_API_URL}/organizations/${organization_id}/workbooks")"
+
+if [[ "${workbook_status}" != "201" ]]; then
+  echo "FAIL: could not create active workbook context (HTTP ${workbook_status})." >&2
+  exit 1
+fi
+workbook_id="$(json_id "${verification_directory}/workbook.json")"
 
 check_openfga() {
   local user_id="$1"

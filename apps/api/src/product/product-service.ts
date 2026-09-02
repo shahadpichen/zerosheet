@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { AuthenticatedUser } from "@zerosheet/contracts";
-import type { AuthorizationGateway } from "../authorization/types.js";
+import type {
+  AuthorizationApplicationService,
+  AuthorizationGateway,
+} from "../authorization/types.js";
 import {
   ProductDependencyError,
   ProductForbiddenError,
@@ -33,7 +36,14 @@ import type {
 
 export interface ProductServiceOptions {
   repository: ProductRepository;
-  authorization: AuthorizationGateway;
+
+  /**
+   * Decisions and relationship writes are intentionally different ports. A
+   * decision must pass through the OpenFGA + PostgreSQL + OPA composition,
+   * while the transactional outbox still needs the narrow OpenFGA write port.
+   */
+  decisions: AuthorizationApplicationService;
+  relationships: AuthorizationGateway;
 
   // Injecting time and UUID generation makes outbox transitions deterministic
   // in tests without replacing secure production randomness or global clocks.
@@ -42,20 +52,22 @@ export interface ProductServiceOptions {
 }
 
 /**
- * ProductService coordinates the product database, OpenFGA decisions, and
- * tuple mutations. Routes never call the relationship writer directly. This
- * ordering is deliberate: authorize the trusted session principal, stage a
- * durable intent, apply it idempotently, then expose the activated resource.
+ * ProductService coordinates product state, composed decisions, and OpenFGA
+ * tuple mutations. Routes never call either authorization dependency directly.
+ * The ordering is deliberate: authorize the trusted session principal, stage
+ * a durable intent, apply it idempotently, then expose the activated resource.
  */
 export class ProductService implements ProductApplicationService {
   private readonly repository: ProductRepository;
-  private readonly authorization: AuthorizationGateway;
+  private readonly decisions: AuthorizationApplicationService;
+  private readonly relationships: AuthorizationGateway;
   private readonly now: () => Date;
   private readonly id: () => string;
 
   public constructor(options: ProductServiceOptions) {
     this.repository = options.repository;
-    this.authorization = options.authorization;
+    this.decisions = options.decisions;
+    this.relationships = options.relationships;
     this.now = options.now ?? (() => new Date());
     this.id = options.id ?? randomUUID;
   }
@@ -64,11 +76,10 @@ export class ProductService implements ProductApplicationService {
     actor: AuthenticatedUser,
     input: CreateNamedResourceInput,
   ): Promise<Organization> {
-    /**
-     * Any authenticated product user may create an organization in this first
-     * lifecycle milestone. Tenant quotas, billing eligibility, and managed-
-     * domain restrictions are contextual policies for the later OPA layer.
-     */
+    await this.requireAllowed(
+      this.decisions.canCreateOrganization({ userId: actor.id }),
+    );
+
     const organization: Organization = {
       id: this.id(),
       name: input.name,
@@ -92,7 +103,7 @@ export class ProductService implements ProductApplicationService {
     input: CreateNamedResourceInput,
   ): Promise<Team> {
     await this.requireAllowed(
-      this.authorization.checkOrganizationPermission({
+      this.decisions.canAccessOrganization({
         userId: actor.id,
         organizationId,
         permission: "can_manage_members",
@@ -123,7 +134,7 @@ export class ProductService implements ProductApplicationService {
     input: CreateNamedResourceInput,
   ): Promise<Workbook> {
     await this.requireAllowed(
-      this.authorization.checkOrganizationPermission({
+      this.decisions.canAccessOrganization({
         userId: actor.id,
         organizationId,
         permission: "can_create_workbook",
@@ -153,7 +164,7 @@ export class ProductService implements ProductApplicationService {
     workbookId: string,
   ): Promise<Workbook> {
     await this.requireAllowed(
-      this.authorization.checkWorkbookPermission({
+      this.decisions.canAccessWorkbook({
         userId: actor.id,
         workbookId,
         permission: "can_view",
@@ -177,7 +188,7 @@ export class ProductService implements ProductApplicationService {
     role: "admin" | "member",
   ): Promise<OrganizationMembership> {
     await this.requireAllowed(
-      this.authorization.checkOrganizationPermission({
+      this.decisions.canAccessOrganization({
         userId: actor.id,
         organizationId,
         permission: "can_manage_members",
@@ -207,7 +218,7 @@ export class ProductService implements ProductApplicationService {
     userId: string,
   ): Promise<void> {
     await this.requireAllowed(
-      this.authorization.checkOrganizationPermission({
+      this.decisions.canAccessOrganization({
         userId: actor.id,
         organizationId,
         permission: "can_manage_members",
@@ -228,7 +239,7 @@ export class ProductService implements ProductApplicationService {
     role: TeamRole,
   ): Promise<TeamMembership> {
     await this.requireAllowed(
-      this.authorization.checkTeamPermission({
+      this.decisions.canAccessTeam({
         userId: actor.id,
         teamId,
         permission: "can_manage",
@@ -253,7 +264,7 @@ export class ProductService implements ProductApplicationService {
     userId: string,
   ): Promise<void> {
     await this.requireAllowed(
-      this.authorization.checkTeamPermission({
+      this.decisions.canAccessTeam({
         userId: actor.id,
         teamId,
         permission: "can_manage",
@@ -309,7 +320,7 @@ export class ProductService implements ProductApplicationService {
 
     for (const operation of operations) {
       try {
-        await this.authorization.applyRelationshipMutation(operation);
+        await this.relationships.applyRelationshipMutation(operation);
         await this.repository.completeRelationshipOperation(
           operation.id,
           this.now(),
@@ -338,7 +349,7 @@ export class ProductService implements ProductApplicationService {
     }
 
     try {
-      await this.authorization.applyRelationshipMutation(staged.operation);
+      await this.relationships.applyRelationshipMutation(staged.operation);
     } catch {
       await this.recordRetry(staged.operation.id);
       throw new ProductDependencyError();
@@ -383,7 +394,7 @@ export class ProductService implements ProductApplicationService {
     workbookId: string,
   ): Promise<void> {
     return this.requireAllowed(
-      this.authorization.checkWorkbookPermission({
+      this.decisions.canAccessWorkbook({
         userId: actor.id,
         workbookId,
         permission: "can_manage_sharing",

@@ -299,7 +299,8 @@ then use the public API. It proves:
 - Ownership transfer and last-owner protection.
 - User suspension, SCIM, and identity-governance approvals.
 - Permission-aware workbook listing with OpenFGA `ListObjects`.
-- OPA contextual policy for tenant status, device, time, and risk.
+- Device, time, and risk facts beyond the account/tenant OPA policy introduced
+  in Milestone 6.
 - Dedicated audit events and security-event export.
 - Moving the retry loop from the API process into the worker deployment.
 - Google Drive permission synchronization and conflict handling.

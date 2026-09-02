@@ -5,9 +5,9 @@
 # often configuration failures, so understanding why a port, account, volume,
 # or health check exists is as important as understanding application code.
 #
-# The "auth-lab" profile starts Keycloak in addition to PostgreSQL. Later
-# milestones will add separate profiles for OpenFGA, OPA, and the worker. This
-# lets the 2 GB staging VPS run only the services needed for a specific lesson.
+# Profiles add Keycloak, OpenFGA, and OPA to the shared PostgreSQL foundation.
+# Keeping them explicit lets the 2 GB staging VPS run only the services needed
+# for a lesson while the combined authorization command starts both PDPs.
 
 name: zerosheet
 
@@ -207,6 +207,41 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     mem_limit: ${OPENFGA_MEMORY_LIMIT:-256m}
+    security_opt:
+      - no-new-privileges:true
+    logging: *local-logging
+    networks:
+      - zerosheet-internal
+
+  opa:
+    # OPA is stateless here: the immutable image runs reviewed Rego policy and
+    # receives only per-request context from the API. Pinning the exact version
+    # makes local decisions and CI policy tests reproducible.
+    image: openpolicyagent/opa:1.20.1
+    container_name: zerosheet-opa
+    profiles: ["contextual-authorization-lab"]
+    command:
+      - run
+      - --server
+      - --addr=0.0.0.0:8181
+      - --log-format=json
+      - --log-level=info
+      - /policy
+    ports:
+      # OPA has no local bearer credential in this learning milestone, so its
+      # decision API must never bind to a LAN-facing interface. Production will
+      # keep it on a private workload-authenticated network.
+      - "127.0.0.1:${OPA_HTTP_PORT:-8181}:8181"
+    volumes:
+      # Policy is code: the container can read the reviewed files but cannot
+      # rewrite them at runtime or use its filesystem as mutable state.
+      - ./opa:/policy:ro
+    read_only: true
+    restart: unless-stopped
+    stop_grace_period: 15s
+    mem_limit: ${OPA_MEMORY_LIMIT:-128m}
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
     logging: *local-logging
