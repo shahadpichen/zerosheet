@@ -69,3 +69,24 @@ Browser
     fail closed instead of being persisted for later reuse.
 29. The workload-only listener is private and separate from human OIDC session
     endpoints. Neither principal type substitutes for the other.
+30. Protected plaintext, recovery phrases, usable user private keys, and raw
+    workbook keys exist only in the authorized browser. Google and ordinary
+    ZeroSheet services receive ciphertext, public keys, encrypted private-key
+    backups, recipient envelopes, and necessary metadata only.
+31. The 12-word recovery phrase protects the user's encrypted HPKE private-key
+    backup; it is not a global content key and is never stored by ZeroSheet.
+32. Each workbook version uses a fresh random 256-bit key. That key is stored
+    remotely only inside an HPKE envelope bound to the exact workbook, key
+    version, recipient key version, and recipient public-key fingerprint.
+33. Each protected cell uses a fresh AES-GCM nonce and authenticates its exact
+    workbook, stable tab ID, coordinate, and workbook-key version as AAD.
+34. A recovery phrase held in browser memory is bound to an immutable product
+    user ID and is cleared on account change, explicit lock, and page reload;
+    localStorage and sessionStorage are not recovery stores.
+35. A public-key fingerprint is an identifier and corruption/pinning aid, not
+    a secret, password, certificate authority, or proof of key ownership.
+36. HPKE base mode provides recipient confidentiality but no sender signature;
+    authenticated API actions and audit records separately identify the actor.
+37. Cell authentication prevents cross-location swapping but does not prevent
+    same-coordinate rollback. Production freshness needs an authenticated
+    workbook revision or manifest in a later format.

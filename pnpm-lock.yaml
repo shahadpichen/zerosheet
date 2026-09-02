@@ -86,6 +86,9 @@ importers:
       "@zerosheet/contracts":
         specifier: workspace:*
         version: link:../../packages/contracts
+      "@zerosheet/crypto":
+        specifier: workspace:*
+        version: link:../../packages/crypto
       react:
         specifier: ^19.0.0
         version: 19.2.8
@@ -114,6 +117,15 @@ importers:
       zod:
         specifier: ^4.0.0
         version: 4.5.4
+
+  packages/crypto:
+    dependencies:
+      "@hpke/core":
+        specifier: 1.9.0
+        version: 1.9.0
+      "@zerodrivehq/capsule":
+        specifier: 0.4.0
+        version: 0.4.0
 
   packages/workload-identity:
     dependencies:
@@ -758,6 +770,20 @@ packages:
     engines: { node: ">=6" }
     hasBin: true
 
+  "@hpke/common@1.10.1":
+    resolution:
+      {
+        integrity: sha512-moJwhmtLtuxiUzzNp1jpfBfx8yefKoO9D/RCR9dmwrnc7qjJqId1rEtQz+lSlU5cabX8daToMSx/7HayXOiaFw==,
+      }
+    engines: { node: ">=16.0.0" }
+
+  "@hpke/core@1.9.0":
+    resolution:
+      {
+        integrity: sha512-pFxWl1nNJeQCSUFs7+GAblHvXBCjn9EPN65vdKlYQil2aURaRxfGMO6vBKGqm1YHTKwiAxJQNEI70PbSowMP9Q==,
+      }
+    engines: { node: ">=16.0.0" }
+
   "@humanfs/core@0.19.2":
     resolution:
       {
@@ -838,6 +864,13 @@ packages:
     engines: { node: ^22.20 || ^24.12 || >=25 }
     cpu: [x64]
     os: [linux]
+
+  "@noble/hashes@2.4.0":
+    resolution:
+      {
+        integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==,
+      }
+    engines: { node: ">= 20.19.0" }
 
   "@openfga/sdk@0.9.7":
     resolution:
@@ -1236,6 +1269,12 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  "@scure/bip39@2.4.0":
+    resolution:
+      {
+        integrity: sha512-82dxFbZUYboyOf0AXiydsQrFQ5Q4h9mX+O2UkE91ROYmsc0BKMGZLwDmy96Jpa2+vrtoxomjUhy1RPIgH/r2nA==,
+      }
+
   "@simple-libs/child-process-utils@2.0.0":
     resolution:
       {
@@ -1477,6 +1516,13 @@ packages:
       {
         integrity: sha512-x6BDOd7dyo3PFLY3I9/HJ25X/6OurhGXk2/B9gOZNPF7XDVjeBK4k01lQE5uvDpbuheErh91qYuE1E2OEjK3Rw==,
       }
+
+  "@zerodrivehq/capsule@0.4.0":
+    resolution:
+      {
+        integrity: sha512-T6IdzfLWmvgzXym5guyaJvQtt5AiY4t9uyWWBxgZm9oKPCSo6VSdWLBwJrIJyO6/M0SVVaS6uzIlA76AKPgN4w==,
+      }
+    engines: { node: ">=24.0.0" }
 
   abstract-logging@2.0.1:
     resolution:
@@ -3805,6 +3851,12 @@ snapshots:
       protobufjs: 7.6.6
       yargs: 17.7.3
 
+  "@hpke/common@1.10.1": {}
+
+  "@hpke/core@1.9.0":
+    dependencies:
+      "@hpke/common": 1.10.1
+
   "@humanfs/core@0.19.2":
     dependencies:
       "@humanfs/types": 0.15.0
@@ -3844,6 +3896,8 @@ snapshots:
 
   "@napi-rs/lzma-linux-x64-gnu@1.5.1":
     optional: true
+
+  "@noble/hashes@2.4.0": {}
 
   "@openfga/sdk@0.9.7":
     dependencies:
@@ -4074,6 +4128,10 @@ snapshots:
   "@rollup/rollup-win32-x64-msvc@4.63.1":
     optional: true
 
+  "@scure/bip39@2.4.0":
+    dependencies:
+      "@noble/hashes": 2.4.0
+
   "@simple-libs/child-process-utils@2.0.0":
     dependencies:
       "@simple-libs/stream-utils": 2.0.0
@@ -4276,6 +4334,10 @@ snapshots:
       "@vitest/pretty-format": 3.2.7
       loupe: 3.2.1
       tinyrainbow: 2.0.0
+
+  "@zerodrivehq/capsule@0.4.0":
+    dependencies:
+      "@scure/bip39": 2.4.0
 
   abstract-logging@2.0.1: {}
 

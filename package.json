@@ -43,6 +43,7 @@
     "infra:workload-mtls:down": "docker compose --env-file .env --file infra/compose.yaml --profile workload-identity-lab --profile workload-mtls-lab stop mtls-api",
     "infra:workload-mtls:logs": "docker compose --env-file .env --file infra/compose.yaml --profile workload-identity-lab --profile workload-mtls-lab logs --follow mtls-api",
     "infra:workload-mtls:verify": "bash infra/scripts/verify-workload-mtls.sh",
+    "crypto:benchmark:cells": "pnpm --filter @zerosheet/crypto build && pnpm --filter @zerosheet/crypto benchmark:cells",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
     "prepare": "node .husky/install.mjs",

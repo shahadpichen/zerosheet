@@ -13,9 +13,10 @@ The product will combine:
 
 ## Current milestone
 
-Milestone 9 uses the API and worker's rotating SPIFFE X.509-SVIDs for a real
-TLS 1.3 connection. Both sides validate SPIRE's trust chain and the exact peer
-SPIFFE ID; another valid identity from the same trust domain is denied.
+Milestone 10 adds the storage-independent browser cryptography core. A
+checksummed 12-word phrase protects the user's HPKE private-key backup, random
+workbook keys encrypt selected cells with AES-256-GCM, and each encrypted cell
+is authenticated against its exact workbook, tab, coordinate, and key version.
 
 ## Repository layout
 
@@ -26,11 +27,14 @@ apps/
   worker/    Lifecycle, audit, and background jobs
 packages/
   contracts/          Shared runtime-validated API contracts
+  crypto/             Browser recovery, HPKE, workbook keys, and encrypted cells
   workload-identity/  SPIFFE Workload API and exact peer checks
 docs/
-  architecture/ System boundaries and decisions
-  learning/     Milestone notes and glossary
-infra/          Local and production infrastructure
+  architecture/       System boundaries and decisions
+  learning/           Milestone notes and glossary
+  security/           Threat model and residual risks
+  specifications/     Persistent format contracts and test vectors
+infra/                Local and production infrastructure
 ```
 
 ## Requirements
@@ -54,6 +58,7 @@ pnpm infra:lifecycle:verify
 pnpm infra:workload-identity:provision
 pnpm infra:workload-identity:verify
 pnpm infra:workload-mtls:verify
+pnpm crypto:benchmark:cells
 pnpm typecheck
 pnpm test
 pnpm dev
@@ -91,3 +96,12 @@ node bootstrap, and Docker workload attestation are explained in
 Mutual TLS, exact peer authorization, streamed SVID rotation, and the private
 API-to-worker boundary are explained in
 [`docs/learning/09-workload-mtls-zero-trust.md`](docs/learning/09-workload-mtls-zero-trust.md).
+
+The phrase/private-key boundary, HPKE recipient envelopes, workbook key
+hierarchy, authenticated per-cell format, benchmark, and important residual
+risks are explained in
+[`docs/learning/10-browser-cryptography-recovery.md`](docs/learning/10-browser-cryptography-recovery.md).
+
+The persistent cell contract and security analysis live in
+[`docs/specifications/encrypted-cell-v1.md`](docs/specifications/encrypted-cell-v1.md)
+and [`docs/security/threat-model.md`](docs/security/threat-model.md).

@@ -2,6 +2,7 @@ import {
   AuthSessionResponseSchema,
   type AuthenticatedUser,
 } from "@zerosheet/contracts";
+import { ENCRYPTED_CELL_PREFIX } from "@zerosheet/crypto";
 import { useEffect, useState } from "react";
 
 type SessionState =
@@ -55,13 +56,13 @@ export function App() {
 
   return (
     <main>
-      <p className="eyebrow">Milestone 8 · Workload identity</p>
-      <h1>Every service must prove what it is.</h1>
+      <p className="eyebrow">Milestone 10 · Browser cryptography</p>
+      <h1>The browser owns the plaintext boundary.</h1>
       <p className="intro">
-        Keycloak identifies people. SPIRE separately attests running API and
-        worker processes and issues short-lived SPIFFE certificates. Human and
-        workload identities meet at the API boundary but never replace each
-        other.
+        Protected values are encrypted in the authorized browser before Google
+        or the ZeroSheet API can see them. Keycloak proves who signed in;
+        possession of the separately recovered workbook key determines who can
+        decrypt protected cells.
       </p>
 
       <section className="session-card" aria-live="polite">
@@ -89,9 +90,9 @@ export function App() {
             <strong>{session.user.displayName}</strong>
             <span>{session.user.email}</span>
             <p className="authorization-note">
-              Your session proves who you are. The server also needs its own
-              rotating workload identity before another internal service should
-              trust it; neither identity grants workbook access alone.
+              Your session proves who you are, but it does not decrypt a
+              workbook. Recovery access and the exact recipient key envelope
+              remain independent requirements.
             </p>
 
             {/* A normal form navigation follows Keycloak's logout redirect.
@@ -120,9 +121,10 @@ export function App() {
       </section>
 
       <p className="boundary-note">
-        Browser: opaque HttpOnly cookie · API: session and policy enforcement ·
-        Keycloak: human authentication · SPIRE: workload identity · OpenFGA:
-        relationships · OPA: context · PostgreSQL: audit evidence
+        Browser: plaintext, recovery, and Web Crypto · Protected cell marker:{" "}
+        <code>{ENCRYPTED_CELL_PREFIX}</code> · Keycloak: human identity ·
+        OpenFGA + OPA: authorization · Google and PostgreSQL: ciphertext and
+        metadata only
       </p>
     </main>
   );

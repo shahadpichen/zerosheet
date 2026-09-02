@@ -1,0 +1,22 @@
+{
+  "name": "@zerosheet/crypto",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "description": "Browser-only recovery, HPKE identity, workbook-key, and authenticated encrypted-cell primitives for ZeroSheet.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "benchmark:cells": "node dist/benchmark.js",
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hpke/core": "1.9.0",
+    "@zerodrivehq/capsule": "0.4.0"
+  }
+}
