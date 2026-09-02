@@ -114,6 +114,14 @@ services:
       KEYCLOAK_BFF_CLIENT_SECRET: ${KEYCLOAK_BFF_CLIENT_SECRET}
       ZEROSHEET_API_URL: ${ZEROSHEET_API_URL}
       ZEROSHEET_WEB_URL: ${ZEROSHEET_WEB_URL}
+
+      # Keycloak, rather than the ZeroSheet API, is the OAuth client registered
+      # with Google for sign-in. Keeping these values in the Keycloak container
+      # makes the upstream secret unavailable to browser and product code.
+      GOOGLE_OIDC_CLIENT_ID: ${GOOGLE_OIDC_CLIENT_ID:?GOOGLE_OIDC_CLIENT_ID is required}
+      GOOGLE_OIDC_CLIENT_SECRET: ${GOOGLE_OIDC_CLIENT_SECRET:?GOOGLE_OIDC_CLIENT_SECRET is required}
+      GOOGLE_IDENTITY_PROVIDER_ENABLED: ${GOOGLE_IDENTITY_PROVIDER_ENABLED:-false}
+      GOOGLE_OIDC_HOSTED_DOMAIN: ${GOOGLE_OIDC_HOSTED_DOMAIN:-}
     ports:
       # Both endpoints are loopback-only. Port 8080 serves OIDC; port 9000 is
       # management-only and exposes health/metrics for this learning lab.

@@ -26,4 +26,13 @@ The named `postgres_data` volume survives `docker compose down`. It is not a bac
 
 `pnpm infra:db:migrate` applies SQL files from `postgres/migrations` as the restricted `zerosheet_app` role. Using the runtime owner proves an application migration cannot silently modify Keycloak or OpenFGA state.
 
-Milestone 2 keeps the API on the developer host and uses the loopback PostgreSQL port. After `pnpm dev` is running, `pnpm infra:oidc:verify` checks both the migrated schema and the live API-to-Keycloak authorization redirect.
+Milestone 3 keeps the API on the developer host and adds Google as a Keycloak-
+brokered upstream identity provider. `pnpm infra:federation:google:configure`
+creates or updates that provider for an existing realm, while
+`pnpm infra:federation:google:verify` applies it and checks Keycloak's persisted
+security settings.
+
+Google federation is disabled while `.env` contains placeholders. After real
+development credentials are added, set `GOOGLE_IDENTITY_PROVIDER_ENABLED=true`
+and rerun the verifier. With `pnpm dev` running, `pnpm infra:oidc:verify` also
+checks the live API-to-Keycloak redirect and the fixed Google broker hint.

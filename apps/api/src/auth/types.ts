@@ -27,6 +27,14 @@ export interface StoredLoginTransaction {
   codeVerifier: string;
 }
 
+/**
+ * These values are Keycloak broker aliases, not arbitrary user input. Keeping
+ * the set closed prevents a query string from becoming an unchecked upstream
+ * identity-provider selector. Add another value only when its Keycloak
+ * provider is intentionally configured and reviewed.
+ */
+export type IdentityProviderHint = "google";
+
 export interface SaveLoginTransactionInput extends StoredLoginTransaction {
   selectorHash: string;
   createdAt: Date;
@@ -76,7 +84,9 @@ export interface AuthRepository {
  * protocol validation.
  */
 export interface OidcGateway {
-  createAuthorizationRequest(): Promise<PendingOidcAuthorization>;
+  createAuthorizationRequest(
+    identityProviderHint?: IdentityProviderHint,
+  ): Promise<PendingOidcAuthorization>;
   exchangeAuthorizationCode(
     callbackUrl: URL,
     transaction: StoredLoginTransaction,
@@ -100,7 +110,9 @@ export interface CompletedLogin {
  * in one service that can be exercised independently.
  */
 export interface AuthApplicationService {
-  beginLogin(): Promise<StartedLogin>;
+  beginLogin(
+    identityProviderHint?: IdentityProviderHint,
+  ): Promise<StartedLogin>;
   completeLogin(
     callbackUrl: URL,
     transactionToken: string | undefined,

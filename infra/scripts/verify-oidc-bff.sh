@@ -135,6 +135,28 @@ for expected_header_fragment in \
   fi
 done
 
+# The Google-specific route must create the same protected transaction while
+# adding only Keycloak's fixed broker hint. This is a shortcut through Keycloak,
+# not a second OAuth implementation inside ZeroSheet.
+google_login_code="$(
+  curl --silent --show-error \
+    --dump-header "${verification_directory}/google-login.headers" \
+    --output /dev/null \
+    --write-out '%{http_code}' \
+    "${api_base_url}/auth/login/google"
+)"
+
+if [[ "${google_login_code}" != "302" ]] ||
+  ! grep --quiet 'kc_idp_hint=google' \
+    "${verification_directory}/google-login.headers" ||
+  ! grep --quiet 'set-cookie: zerosheet_oidc_transaction=' \
+    "${verification_directory}/google-login.headers" ||
+  ! grep --quiet 'HttpOnly' \
+    "${verification_directory}/google-login.headers"; then
+  echo "FAIL: Google login did not use the protected Keycloak broker flow." >&2
+  exit 1
+fi
+
 # Extract the cookie locally, hash it, and prove PostgreSQL contains the digest.
 # Neither the raw transaction cookie nor its state/nonce is printed.
 transaction_token="$(
@@ -185,5 +207,6 @@ fi
 echo "PASS: API health and fail-closed anonymous session behavior are correct."
 echo "PASS: an unbound callback is rejected without disclosing which validation failed."
 echo "PASS: login uses Authorization Code, PKCE S256, state, nonce, and an HttpOnly SameSite cookie."
+echo "PASS: Google login adds only the reviewed Keycloak broker hint and retains the protected transaction."
 echo "PASS: PostgreSQL stores the transaction cookie digest rather than relying on browser identity claims."
 echo "PASS: logout redirects through Keycloak with the registered client and destination."

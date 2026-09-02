@@ -1,7 +1,10 @@
 import type { AuthenticatedUser } from "@zerosheet/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { AuthenticationFlowError } from "./auth/auth-service.js";
-import type { AuthApplicationService } from "./auth/types.js";
+import type {
+  AuthApplicationService,
+  IdentityProviderHint,
+} from "./auth/types.js";
 import { buildApp } from "./app.js";
 import type { RuntimeConfig } from "./config.js";
 
@@ -21,8 +24,11 @@ class FakeAuthService implements AuthApplicationService {
   public failCallback = false;
   public callbackTransactionToken: string | undefined;
   public loggedOutToken: string | undefined;
+  public identityProviderHint: IdentityProviderHint | undefined;
 
-  public beginLogin() {
+  public beginLogin(identityProviderHint?: IdentityProviderHint) {
+    this.identityProviderHint = identityProviderHint;
+
     return Promise.resolve({
       authorizationUrl: new URL(
         "http://localhost:8080/realms/zerosheet/protocol/openid-connect/auth?state=provider-state",
@@ -129,7 +135,7 @@ describe("ZeroSheet HTTP authentication boundary", () => {
   });
 
   it("starts login with a protected, short-lived transaction cookie", async () => {
-    const { app } = makeApp();
+    const { app, service } = makeApp();
     apps.push(app);
 
     const response = await app.inject({ method: "GET", url: "/auth/login" });
@@ -145,6 +151,23 @@ describe("ZeroSheet HTTP authentication boundary", () => {
     expect(response.headers["set-cookie"]).toContain("SameSite=Lax");
     expect(response.headers["set-cookie"]).toContain("Max-Age=600");
     expect(response.headers["cache-control"]).toBe("no-store");
+    expect(service.identityProviderHint).toBeUndefined();
+  });
+
+  it("starts the same protected flow with the fixed Google broker hint", async () => {
+    const { app, service } = makeApp();
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/login/google",
+    });
+
+    expect(response.statusCode).toBe(302);
+    expect(service.identityProviderHint).toBe("google");
+    expect(response.headers["set-cookie"]).toContain(
+      "zerosheet_oidc_transaction=browser-transaction-token",
+    );
   });
 
   it("replaces a consumed login transaction with an opaque session", async () => {

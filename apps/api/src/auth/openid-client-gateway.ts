@@ -2,6 +2,7 @@ import * as client from "openid-client";
 import type { OidcConfig } from "../config.js";
 import type {
   ExternalIdentityProfile,
+  IdentityProviderHint,
   OidcGateway,
   PendingOidcAuthorization,
   StoredLoginTransaction,
@@ -43,13 +44,15 @@ class OpenIdClientGateway implements OidcGateway {
     private readonly settings: OidcConfig,
   ) {}
 
-  public async createAuthorizationRequest(): Promise<PendingOidcAuthorization> {
+  public async createAuthorizationRequest(
+    identityProviderHint?: IdentityProviderHint,
+  ): Promise<PendingOidcAuthorization> {
     const state = client.randomState();
     const nonce = client.randomNonce();
     const codeVerifier = client.randomPKCECodeVerifier();
     const codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
 
-    const authorizationUrl = client.buildAuthorizationUrl(this.configuration, {
+    const authorizationParameters: Record<string, string> = {
       response_type: "code",
       redirect_uri: this.settings.callbackUrl.href,
       scope: "openid email profile",
@@ -57,7 +60,22 @@ class OpenIdClientGateway implements OidcGateway {
       nonce,
       code_challenge: codeChallenge,
       code_challenge_method: "S256",
-    });
+    };
+
+    /**
+     * `kc_idp_hint` is a Keycloak broker extension. It asks Keycloak to start
+     * with a named upstream provider, but it does not bypass Keycloak's broker
+     * callback, first-login flow, account-linking checks, or token issuance.
+     * ZeroSheet still validates only the Keycloak issuer.
+     */
+    if (identityProviderHint) {
+      authorizationParameters.kc_idp_hint = identityProviderHint;
+    }
+
+    const authorizationUrl = client.buildAuthorizationUrl(
+      this.configuration,
+      authorizationParameters,
+    );
 
     return {
       authorizationUrl,

@@ -17,6 +17,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "infra:db:migrate": "bash infra/scripts/migrate-zerosheet-database.sh",
+    "infra:federation:google:configure": "bash infra/scripts/configure-google-identity-provider.sh",
+    "infra:federation:google:verify": "bash infra/scripts/verify-google-identity-provider.sh",
     "infra:auth:config": "docker compose --env-file .env --file infra/compose.yaml --profile auth-lab config --quiet",
     "infra:auth:down": "docker compose --env-file .env --file infra/compose.yaml --profile auth-lab down",
     "infra:auth:logs": "docker compose --env-file .env --file infra/compose.yaml --profile auth-lab logs --follow postgres keycloak",

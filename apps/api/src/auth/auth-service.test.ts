@@ -5,6 +5,7 @@ import { hashOpaqueToken } from "./opaque-tokens.js";
 import type {
   AuthRepository,
   CreateSessionInput,
+  IdentityProviderHint,
   OidcGateway,
   SaveLoginTransactionInput,
   StoredLoginTransaction,
@@ -80,8 +81,13 @@ class RecordingRepository implements AuthRepository {
 
 class RecordingOidcGateway implements OidcGateway {
   public exchangedTransaction: StoredLoginTransaction | undefined;
+  public identityProviderHint: IdentityProviderHint | undefined;
 
-  public createAuthorizationRequest() {
+  public createAuthorizationRequest(
+    identityProviderHint?: IdentityProviderHint,
+  ) {
+    this.identityProviderHint = identityProviderHint;
+
     return Promise.resolve({
       authorizationUrl: new URL("http://keycloak.local/authorize"),
       state: "oidc-state",
@@ -143,6 +149,19 @@ describe("AuthService", () => {
     expect(JSON.stringify(repository.savedTransaction)).not.toContain(
       "raw-transaction-token",
     );
+  });
+
+  it("forwards the reviewed Google alias without changing the login transaction", async () => {
+    const { service, repository, oidc } = serviceFixture();
+
+    await service.beginLogin("google");
+
+    expect(oidc.identityProviderHint).toBe("google");
+    expect(repository.savedTransaction).toMatchObject({
+      state: "oidc-state",
+      nonce: "oidc-nonce",
+      codeVerifier: "pkce-verifier",
+    });
   });
 
   it("consumes PKCE state and creates a separately hashed product session", async () => {

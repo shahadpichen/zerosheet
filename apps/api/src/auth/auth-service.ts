@@ -6,6 +6,7 @@ import type {
   AuthApplicationService,
   AuthRepository,
   CompletedLogin,
+  IdentityProviderHint,
   OidcGateway,
   StartedLogin,
 } from "./types.js";
@@ -48,10 +49,16 @@ export class AuthService implements AuthApplicationService {
     this.userId = options.userId ?? randomUUID;
   }
 
-  public async beginLogin(): Promise<StartedLogin> {
+  public async beginLogin(
+    identityProviderHint?: IdentityProviderHint,
+  ): Promise<StartedLogin> {
     const now = this.now();
     const transactionToken = this.opaqueToken();
-    const request = await this.oidc.createAuthorizationRequest();
+
+    // The hint changes only Keycloak's first screen. PKCE, state, nonce, the
+    // callback, and the ZeroSheet session lifecycle remain exactly the same.
+    const request =
+      await this.oidc.createAuthorizationRequest(identityProviderHint);
 
     await this.repository.saveLoginTransaction({
       selectorHash: hashOpaqueToken(transactionToken),

@@ -51,6 +51,30 @@
       }
     }
   ],
+  "identityProviders": [
+    {
+      "alias": "google",
+      "displayName": "Google",
+      "providerId": "google",
+      "enabled": false,
+      "trustEmail": true,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "authenticateByDefault": false,
+      "linkOnly": false,
+      "hideOnLogin": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "updateProfileFirstLoginMode": "missing",
+      "config": {
+        "clientId": "${GOOGLE_OIDC_CLIENT_ID}",
+        "clientSecret": "${GOOGLE_OIDC_CLIENT_SECRET}",
+        "defaultScope": "openid profile email",
+        "hostedDomain": "${GOOGLE_OIDC_HOSTED_DOMAIN}",
+        "syncMode": "IMPORT",
+        "useJwksUrl": "true"
+      }
+    }
+  ],
   "users": [
     {
       "username": "${KEYCLOAK_TEST_USER_USERNAME}",

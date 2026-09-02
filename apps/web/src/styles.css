@@ -76,6 +76,15 @@ h1 {
   margin-top: 14px;
 }
 
+/* Login choices stay grouped because both enter the same Keycloak-controlled
+   OIDC flow. Google is a shortcut to an upstream provider, while the local
+   option remains useful for development and emergency administrator access. */
+.login-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .primary-action,
 .secondary-action {
   display: inline-flex;

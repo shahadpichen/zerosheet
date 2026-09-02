@@ -4,6 +4,8 @@ ZeroSheet separates authentication, authorization, product data, and encryption-
 
 ```text
 Browser
+  -> Google / optional upstream authentication
+  -> Keycloak broker / sole ZeroSheet OIDC issuer
   -> opaque HttpOnly ZeroSheet session
   -> ZeroSheet API / BFF / future PEP
       -> Keycloak / authentication
@@ -23,3 +25,7 @@ Browser
 6. Missing or unavailable authorization data results in denial.
 7. Keycloak tokens and OIDC client secrets remain behind the BFF boundary; browser JavaScript receives only a narrow product-user projection.
 8. External identities are keyed by the OIDC `(issuer, subject)` pair. Email alone never links accounts.
+9. Upstream Google login and Google Drive API authorization are separate grants;
+   sign-in does not grant storage access.
+10. A Keycloak provider hint selects a reviewed login route but never bypasses
+    first-login, account-linking, token validation, or product authorization.

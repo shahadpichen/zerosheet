@@ -55,11 +55,12 @@ export function App() {
 
   return (
     <main>
-      <p className="eyebrow">Milestone 2 · OIDC BFF</p>
+      <p className="eyebrow">Milestone 3 · Google federation</p>
       <h1>Identity stays behind the boundary.</h1>
       <p className="intro">
-        Keycloak authenticates you. ZeroSheet converts the verified identity
-        into a short-lived, server-side product session.
+        Google can authenticate you through Keycloak. ZeroSheet trusts only the
+        identity Keycloak verifies and converts it into a short-lived,
+        server-side product session.
       </p>
 
       <section className="session-card" aria-live="polite">
@@ -70,9 +71,14 @@ export function App() {
         {session.status === "anonymous" && (
           <>
             <p className="status">You are not signed in.</p>
-            <a className="primary-action" href="/api/auth/login">
-              Continue to Keycloak
-            </a>
+            <div className="login-actions">
+              <a className="primary-action" href="/api/auth/login/google">
+                Continue with Google
+              </a>
+              <a className="secondary-action" href="/api/auth/login">
+                Use a local Keycloak account
+              </a>
+            </div>
           </>
         )}
 

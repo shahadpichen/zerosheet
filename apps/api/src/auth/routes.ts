@@ -5,7 +5,7 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuthCookieConfig, AuthLifetimeConfig } from "../config.js";
 import { AuthenticationFlowError } from "./auth-service.js";
-import type { AuthApplicationService } from "./types.js";
+import type { AuthApplicationService, IdentityProviderHint } from "./types.js";
 
 export interface AuthRouteOptions {
   service: AuthApplicationService;
@@ -45,6 +45,36 @@ function configuredCallbackUrl(request: FastifyRequest, callbackUrl: URL): URL {
   return trusted;
 }
 
+/**
+ * Both login buttons create the same protected transaction and cookie. The
+ * optional hint only chooses the first Keycloak screen; keeping this behavior
+ * in one function prevents the Google shortcut from drifting into a weaker
+ * authentication flow later.
+ */
+async function startLogin(
+  reply: FastifyReply,
+  options: AuthRouteOptions,
+  identityProviderHint?: IdentityProviderHint,
+): Promise<FastifyReply> {
+  const login = await options.service.beginLogin(identityProviderHint);
+
+  reply.setCookie(
+    options.cookies.loginTransactionName,
+    login.transactionToken,
+    {
+      httpOnly: true,
+      secure: options.cookies.secure,
+      sameSite: "lax",
+      path: "/",
+      maxAge: options.lifetimes.loginTransactionSeconds,
+    },
+  );
+
+  // A normal 302 is appropriate because both the incoming request and the
+  // Keycloak authorization endpoint use GET.
+  return reply.redirect(login.authorizationUrl.href, 302);
+}
+
 export function registerAuthRoutes(
   app: FastifyInstance,
   options: AuthRouteOptions,
@@ -55,23 +85,14 @@ export function registerAuthRoutes(
   });
 
   app.get("/auth/login", async (_request, reply) => {
-    const login = await options.service.beginLogin();
+    return startLogin(reply, options);
+  });
 
-    reply.setCookie(
-      options.cookies.loginTransactionName,
-      login.transactionToken,
-      {
-        httpOnly: true,
-        secure: options.cookies.secure,
-        sameSite: "lax",
-        path: "/",
-        maxAge: options.lifetimes.loginTransactionSeconds,
-      },
-    );
-
-    // A normal 302 is appropriate because both the incoming request and the
-    // Keycloak authorization endpoint use GET.
-    return reply.redirect(login.authorizationUrl.href, 302);
+  app.get("/auth/login/google", async (_request, reply) => {
+    // The route owns the fixed alias. We deliberately do not accept a provider
+    // name from a request parameter because only reviewed providers should be
+    // able to participate in the authentication trust chain.
+    return startLogin(reply, options, "google");
   });
 
   app.get("/auth/callback", async (request, reply) => {
