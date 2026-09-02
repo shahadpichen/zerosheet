@@ -26,6 +26,11 @@ The named `postgres_data` volume survives `docker compose down`. It is not a bac
 
 `pnpm infra:db:migrate` applies SQL files from `postgres/migrations` as the restricted `zerosheet_app` role. Using the runtime owner proves an application migration cannot silently modify Keycloak or OpenFGA state.
 
+Migration 002 adds organization, team, workbook, membership, share, and
+relationship-outbox tables. The outbox is ZeroSheet product state; OpenFGA
+continues to own and evaluate the applied relationship graph in its isolated
+database.
+
 Milestone 3 keeps the API on the developer host and adds Google as a Keycloak-
 brokered upstream identity provider. `pnpm infra:federation:google:configure`
 creates or updates that provider for an existing realm, while
@@ -43,3 +48,7 @@ complete before the decision server starts, and its public host binding is
 loopback-only. `pnpm infra:authorization:model:test` validates policy without a
 server; `pnpm infra:authorization:provision` writes the tested model; and
 `pnpm infra:authorization:verify` checks the live API PEP.
+
+Milestone 5 keeps those services and adds `pnpm infra:product:verify`. The live
+check performs product creation and revocation through the API, then proves the
+corresponding metadata and relationship intents converged.

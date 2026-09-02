@@ -55,11 +55,13 @@ export function App() {
 
   return (
     <main>
-      <p className="eyebrow">Milestone 4 · OpenFGA authorization</p>
-      <h1>Identity proves who. Relationships decide what.</h1>
+      <p className="eyebrow">Milestone 5 · Product lifecycle</p>
+      <h1>Relationships now follow real product changes.</h1>
       <p className="intro">
         Keycloak establishes your ZeroSheet identity. OpenFGA separately decides
         which organizations, teams, and workbooks that identity may access.
+        ZeroSheet now creates and revokes those relationships through a durable
+        control plane.
       </p>
 
       <section className="session-card" aria-live="polite">
@@ -87,8 +89,9 @@ export function App() {
             <strong>{session.user.displayName}</strong>
             <span>{session.user.email}</span>
             <p className="authorization-note">
-              Your session proves who you are. Every workbook request still
-              requires an explicit relationship decision.
+              Your session proves who you are. Product changes create durable
+              relationship intents, and every workbook request still requires an
+              explicit OpenFGA decision.
             </p>
 
             {/* A normal form navigation follows Keycloak's logout redirect.

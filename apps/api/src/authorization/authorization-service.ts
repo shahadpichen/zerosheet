@@ -1,6 +1,8 @@
 import type {
   AuthorizationApplicationService,
   AuthorizationGateway,
+  CheckOrganizationPermissionInput,
+  CheckTeamPermissionInput,
   CheckWorkbookPermissionInput,
 } from "./types.js";
 
@@ -12,6 +14,16 @@ import type {
  */
 export class AuthorizationService implements AuthorizationApplicationService {
   public constructor(private readonly gateway: AuthorizationGateway) {}
+
+  public canAccessOrganization(
+    input: CheckOrganizationPermissionInput,
+  ): Promise<boolean> {
+    return this.gateway.checkOrganizationPermission(input);
+  }
+
+  public canAccessTeam(input: CheckTeamPermissionInput): Promise<boolean> {
+    return this.gateway.checkTeamPermission(input);
+  }
 
   public canAccessWorkbook(
     input: CheckWorkbookPermissionInput,

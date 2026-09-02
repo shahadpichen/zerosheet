@@ -12,10 +12,9 @@ The product will combine:
 
 ## Current milestone
 
-Milestone 4 adds OpenFGA relationship authorization and the first API Policy
-Enforcement Point. Authentication establishes a stable product user; every
-protected workbook request now requires a separate explicit authorization
-decision.
+Milestone 5 adds the first product control plane. Authenticated users can create
+organizations, teams, and workbook metadata, while membership and sharing APIs
+coordinate PostgreSQL state with retryable OpenFGA relationship mutations.
 
 ## Repository layout
 
@@ -47,6 +46,7 @@ pnpm infra:federation:google:verify
 pnpm infra:authorization:up
 pnpm infra:authorization:provision
 pnpm infra:db:migrate
+pnpm infra:product:verify
 pnpm typecheck
 pnpm test
 pnpm dev
@@ -64,3 +64,7 @@ to create a development Google OAuth client and enable interactive Google login.
 
 The OpenFGA model and all authorization concepts are explained in
 [`docs/learning/04-openfga-authorization-foundation.md`](docs/learning/04-openfga-authorization-foundation.md).
+
+The transactional outbox, product APIs, joiner/mover/leaver rules, and sharing
+lifecycle are explained in
+[`docs/learning/05-product-authorization-lifecycle.md`](docs/learning/05-product-authorization-lifecycle.md).

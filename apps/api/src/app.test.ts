@@ -11,6 +11,22 @@ import type {
   AuthorizationApplicationService,
   CheckWorkbookPermissionInput,
 } from "./authorization/types.js";
+import type {
+  Organization,
+  OrganizationMembership,
+  ProductApplicationService,
+  Team,
+  TeamMembership,
+  TeamRole,
+  Workbook,
+  WorkbookShare,
+  WorkbookSharePrincipal,
+  WorkbookShareRole,
+} from "./product/types.js";
+import {
+  ProductDependencyError,
+  ProductForbiddenError,
+} from "./product/errors.js";
 
 const testUser: AuthenticatedUser = {
   id: "d19b70b8-d531-43ac-a734-12270ca484d3",
@@ -87,6 +103,100 @@ class FakeAuthorizationService implements AuthorizationApplicationService {
 
     return Promise.resolve(this.allowed);
   }
+
+  public canAccessOrganization() {
+    return Promise.resolve(this.allowed);
+  }
+
+  public canAccessTeam() {
+    return Promise.resolve(this.allowed);
+  }
+}
+
+class FakeProductService implements ProductApplicationService {
+  public error: Error | undefined;
+  public createdOrganizationName: string | undefined;
+  public sharePrincipal: WorkbookSharePrincipal | undefined;
+  public organization: Organization = {
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    name: "Acme",
+  };
+  public team: Team = {
+    id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    organizationId: this.organization.id,
+    name: "Finance",
+  };
+  public workbook: Workbook = {
+    id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    organizationId: this.organization.id,
+    name: "Budget",
+    createdBy: testUser.id,
+  };
+
+  public createOrganization(
+    _actor: AuthenticatedUser,
+    input: { name: string },
+  ): Promise<Organization> {
+    this.createdOrganizationName = input.name;
+    if (this.error) return Promise.reject(this.error);
+    return Promise.resolve(this.organization);
+  }
+
+  public createTeam(): Promise<Team> {
+    return Promise.resolve(this.team);
+  }
+
+  public createWorkbook(): Promise<Workbook> {
+    return Promise.resolve(this.workbook);
+  }
+
+  public getWorkbook(): Promise<Workbook> {
+    return Promise.resolve(this.workbook);
+  }
+
+  public setOrganizationMember(
+    _actor: AuthenticatedUser,
+    organizationId: string,
+    userId: string,
+    role: "admin" | "member",
+  ): Promise<OrganizationMembership> {
+    return Promise.resolve({ organizationId, userId, role });
+  }
+
+  public removeOrganizationMember(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  public setTeamMember(
+    _actor: AuthenticatedUser,
+    teamId: string,
+    userId: string,
+    role: TeamRole,
+  ): Promise<TeamMembership> {
+    return Promise.resolve({ teamId, userId, role });
+  }
+
+  public removeTeamMember(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  public setWorkbookShare(
+    _actor: AuthenticatedUser,
+    workbookId: string,
+    principal: WorkbookSharePrincipal,
+    role: WorkbookShareRole,
+  ): Promise<WorkbookShare> {
+    this.sharePrincipal = principal;
+    return Promise.resolve({ workbookId, principal, role });
+  }
+
+  public removeWorkbookShare(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  public reconcilePendingOperations(): Promise<number> {
+    return Promise.resolve(0);
+  }
 }
 
 function testConfig(): RuntimeConfig {
@@ -133,16 +243,19 @@ function testConfig(): RuntimeConfig {
 function makeApp(
   service = new FakeAuthService(),
   authorizationService = new FakeAuthorizationService(),
+  productService = new FakeProductService(),
 ) {
   return {
     app: buildApp({
       authService: service,
       authorizationService,
+      productService,
       config: testConfig(),
       logger: false,
     }),
     service,
     authorizationService,
+    productService,
   };
 }
 
@@ -361,5 +474,122 @@ describe("ZeroSheet HTTP authentication boundary", () => {
 
     expect(response.statusCode).toBe(500);
     expect(response.body).not.toContain('"allowed":true');
+  });
+
+  it("requires a product session before creating an organization", async () => {
+    const { app, productService } = makeApp();
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/organizations",
+      payload: { name: "Acme" },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(productService.createdOrganizationName).toBeUndefined();
+  });
+
+  it("validates and normalizes product input before creating state", async () => {
+    const auth = new FakeAuthService();
+    auth.user = testUser;
+    const { app, productService } = makeApp(auth);
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/organizations",
+      cookies: { zerosheet_session: "opaque-browser-session" },
+      payload: { name: "  Acme  " },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toEqual(productService.organization);
+    expect(productService.createdOrganizationName).toBe("Acme");
+    expect(response.headers["cache-control"]).toBe("no-store");
+  });
+
+  it("rejects browser-supplied owner roles and tuple-like extra fields", async () => {
+    const auth = new FakeAuthService();
+    auth.user = testUser;
+    const { app, productService } = makeApp(auth);
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "PUT",
+      url: `/organizations/${productService.organization.id}/members/${testUser.id}`,
+      cookies: { zerosheet_session: "opaque-browser-session" },
+      payload: { role: "owner", relation: "owner" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: "invalid_request" });
+  });
+
+  it("maps a product authorization denial to a generic 403", async () => {
+    const auth = new FakeAuthService();
+    auth.user = testUser;
+    const product = new FakeProductService();
+    product.error = new ProductForbiddenError();
+    const { app } = makeApp(auth, new FakeAuthorizationService(), product);
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/organizations",
+      cookies: { zerosheet_session: "opaque-browser-session" },
+      payload: { name: "Acme" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({
+      error: "forbidden",
+      message: "You do not have permission to perform this action.",
+    });
+  });
+
+  it("returns retryable 503 when relationship synchronization is unavailable", async () => {
+    const auth = new FakeAuthService();
+    auth.user = testUser;
+    const product = new FakeProductService();
+    product.error = new ProductDependencyError();
+    const { app } = makeApp(auth, new FakeAuthorizationService(), product);
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/organizations",
+      cookies: { zerosheet_session: "opaque-browser-session" },
+      payload: { name: "Acme" },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({
+      error: "authorization_unavailable",
+    });
+  });
+
+  it("maps the fixed team-share route to a team principal", async () => {
+    const auth = new FakeAuthService();
+    auth.user = testUser;
+    const { app, productService } = makeApp(auth);
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "PUT",
+      url: `/workbooks/${productService.workbook.id}/shares/teams/${productService.team.id}`,
+      cookies: { zerosheet_session: "opaque-browser-session" },
+      payload: { role: "editor" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      principal: { type: "team", id: productService.team.id },
+      role: "editor",
+    });
+    expect(productService.sharePrincipal).toEqual({
+      type: "team",
+      id: productService.team.id,
+    });
   });
 });

@@ -33,3 +33,8 @@ Browser
     workbook relationships are explicit and separately enforced.
 12. OpenFGA stores product-user/resource relationships only. An authorization
     allow neither contains nor substitutes for a decryption-key envelope.
+13. PostgreSQL commits pending product state and an exact relationship outbox
+    intent together; only successful, idempotent OpenFGA application activates
+    that state.
+14. Organization-member removal also removes tenant team memberships so a
+    leaver cannot retain a team-inherited workbook authorization path.

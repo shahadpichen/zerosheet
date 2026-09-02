@@ -71,6 +71,108 @@ export const InvalidWorkbookResponseSchema = z.object({
   message: z.string().min(1),
 });
 
+/**
+ * Product lifecycle inputs are intentionally narrow. OpenFGA tuple strings,
+ * owner roles, authorization states, and creator IDs are never accepted from
+ * the browser; the API derives all of them from the authenticated operation.
+ */
+export const NamedResourceInputSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+  })
+  .strict();
+
+export const OrganizationParametersSchema = z.object({
+  organizationId: z.string().uuid(),
+});
+
+export const OrganizationMemberParametersSchema = z.object({
+  organizationId: z.string().uuid(),
+  userId: z.string().uuid(),
+});
+
+export const TeamParametersSchema = z.object({
+  teamId: z.string().uuid(),
+});
+
+export const TeamMemberParametersSchema = z.object({
+  teamId: z.string().uuid(),
+  userId: z.string().uuid(),
+});
+
+export const WorkbookShareParametersSchema = z.object({
+  workbookId: z.string().uuid(),
+  principalId: z.string().uuid(),
+});
+
+export const OrganizationMemberInputSchema = z
+  .object({
+    role: z.enum(["admin", "member"]),
+  })
+  .strict();
+
+export const TeamMemberInputSchema = z
+  .object({
+    role: z.enum(["manager", "member"]),
+  })
+  .strict();
+
+export const WorkbookShareInputSchema = z
+  .object({
+    role: z.enum(["editor", "viewer"]),
+  })
+  .strict();
+
+export const OrganizationResponseSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).max(200),
+});
+
+export const TeamResponseSchema = z.object({
+  id: z.string().uuid(),
+  organizationId: z.string().uuid(),
+  name: z.string().min(1).max(200),
+});
+
+export const WorkbookResponseSchema = z.object({
+  id: z.string().uuid(),
+  organizationId: z.string().uuid(),
+  name: z.string().min(1).max(200),
+  createdBy: z.string().uuid(),
+});
+
+export const OrganizationMembershipResponseSchema = z.object({
+  organizationId: z.string().uuid(),
+  userId: z.string().uuid(),
+  role: z.enum(["owner", "admin", "member"]),
+});
+
+export const TeamMembershipResponseSchema = z.object({
+  teamId: z.string().uuid(),
+  userId: z.string().uuid(),
+  role: z.enum(["manager", "member"]),
+});
+
+export const WorkbookShareResponseSchema = z.object({
+  workbookId: z.string().uuid(),
+  principal: z.discriminatedUnion("type", [
+    z.object({ type: z.literal("user"), id: z.string().uuid() }),
+    z.object({ type: z.literal("team"), id: z.string().uuid() }),
+  ]),
+  role: z.enum(["editor", "viewer"]),
+});
+
+export const ProductErrorResponseSchema = z.object({
+  error: z.enum([
+    "invalid_request",
+    "forbidden",
+    "not_found",
+    "conflict",
+    "authorization_unavailable",
+  ]),
+  message: z.string().min(1),
+});
+
 export type AuthenticatedUser = z.infer<typeof AuthenticatedUserSchema>;
 export type AuthSessionResponse = z.infer<typeof AuthSessionResponseSchema>;
 export type AuthenticationErrorResponse = z.infer<
@@ -82,3 +184,14 @@ export type WorkbookAccessResponse = z.infer<
 export type AuthorizationDeniedResponse = z.infer<
   typeof AuthorizationDeniedResponseSchema
 >;
+export type OrganizationResponse = z.infer<typeof OrganizationResponseSchema>;
+export type TeamResponse = z.infer<typeof TeamResponseSchema>;
+export type WorkbookResponse = z.infer<typeof WorkbookResponseSchema>;
+export type OrganizationMembershipResponse = z.infer<
+  typeof OrganizationMembershipResponseSchema
+>;
+export type TeamMembershipResponse = z.infer<
+  typeof TeamMembershipResponseSchema
+>;
+export type WorkbookShareResponse = z.infer<typeof WorkbookShareResponseSchema>;
+export type ProductErrorResponse = z.infer<typeof ProductErrorResponseSchema>;

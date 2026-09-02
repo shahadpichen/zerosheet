@@ -311,7 +311,8 @@ on exit.
 
 ## Deliberately deferred
 
-- Product APIs for creating organizations, teams, workbooks, and tuples.
+- Product APIs for creating organizations, teams, workbooks, and tuples
+  (delivered in [Milestone 5](05-product-authorization-lifecycle.md)).
 - Invitation, joiner/mover/leaver, and SCIM lifecycle workflows.
 - OPA contextual rules for tenant status, device posture, or risk.
 - Permission-aware workbook listing with OpenFGA `ListObjects`.

@@ -9,10 +9,13 @@ import { registerAuthRoutes } from "./auth/routes.js";
 import type { AuthApplicationService } from "./auth/types.js";
 import { registerAuthorizationRoutes } from "./authorization/routes.js";
 import type { AuthorizationApplicationService } from "./authorization/types.js";
+import { registerProductRoutes } from "./product/routes.js";
+import type { ProductApplicationService } from "./product/types.js";
 
 export interface BuildAppOptions {
   authService: AuthApplicationService;
   authorizationService: AuthorizationApplicationService;
+  productService: ProductApplicationService;
   config: RuntimeConfig;
   logger?: boolean;
 }
@@ -83,6 +86,20 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
     registerAuthorizationRoutes(authorizationScope, {
       authentication: options.authService,
       authorization: options.authorizationService,
+      cookies: options.config.authCookies,
+    });
+    done();
+  });
+
+  /**
+   * Product lifecycle routes form a second PEP surface. The product service
+   * coordinates metadata and relationship mutations, while this plugin keeps
+   * session cookies and HTTP response policy at the transport boundary.
+   */
+  void app.register((productScope, _pluginOptions, done) => {
+    registerProductRoutes(productScope, {
+      authentication: options.authService,
+      product: options.productService,
       cookies: options.config.authCookies,
     });
     done();

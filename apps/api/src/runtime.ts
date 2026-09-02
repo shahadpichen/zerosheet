@@ -6,6 +6,8 @@ import { loadRuntimeConfig } from "./config.js";
 import { createDatabasePool } from "./database.js";
 import { AuthorizationService } from "./authorization/authorization-service.js";
 import { createOpenFgaAuthorizationGateway } from "./authorization/openfga-authorization-gateway.js";
+import { PostgresProductRepository } from "./product/postgres-product-repository.js";
+import { ProductService } from "./product/product-service.js";
 
 /**
  * This composition root is the only place that chooses concrete adapters.
@@ -21,6 +23,8 @@ export async function createRuntimeApp() {
   try {
     const repository = new PostgresAuthRepository(pool);
     await repository.assertReady();
+    const productRepository = new PostgresProductRepository(pool);
+    await productRepository.assertReady();
 
     const oidc = await createOpenIdClientGateway(config.oidc);
     const authService = new AuthService({
@@ -33,12 +37,37 @@ export async function createRuntimeApp() {
     );
     await authorizationGateway.assertReady();
     const authorizationService = new AuthorizationService(authorizationGateway);
-    const app = buildApp({ authService, authorizationService, config });
+    const productService = new ProductService({
+      repository: productRepository,
+      authorization: authorizationGateway,
+    });
+
+    /**
+     * A previous process may have stopped after PostgreSQL stored a mutation or
+     * after OpenFGA applied it. Replaying pending intents before listening
+     * closes both windows; OpenFGA conflict-ignore semantics make replay safe.
+     */
+    await productService.reconcilePendingOperations();
+    const reconciliationTimer = setInterval(() => {
+      void productService.reconcilePendingOperations().catch(() => {
+        // Request traffic remains fail-closed. A later interval retries; the
+        // timer must not crash the API merely because one dependency is down.
+      });
+    }, 5_000);
+    reconciliationTimer.unref();
+
+    const app = buildApp({
+      authService,
+      authorizationService,
+      productService,
+      config,
+    });
 
     // Fastify owns process lifecycle, so closing the app must also drain its
     // PostgreSQL connections. This matters during watch-mode restarts and
     // graceful container shutdowns.
     app.addHook("onClose", async () => {
+      clearInterval(reconciliationTimer);
       await pool.end();
     });
 
