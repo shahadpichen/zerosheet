@@ -12,6 +12,7 @@ import type {
   WorkbookKeyEnvelope,
   WorkbookRotationResponse,
   WorkbookRotationPlanResponse,
+  WorkbookSharingAuditExpectationResponse,
   WorkbookShareResponse,
 } from "@zerosheet/contracts";
 
@@ -82,6 +83,9 @@ export interface WorkbookSecurityRepository {
     workbookId: string,
     userId: string,
   ): Promise<WorkbookEncryptionAccessResponse | null>;
+  listSharingAuditExpectation(
+    workbookId: string,
+  ): Promise<WorkbookSharingAuditExpectationResponse>;
   createRotationPlan(
     workbookId: string,
     revokedUserId: string,
@@ -119,6 +123,10 @@ export interface WorkbookSecurityApplicationService {
     actor: AuthenticatedUser,
     workbookId: string,
   ): Promise<WorkbookEncryptionAccessResponse>;
+  sharingAuditExpectation(
+    actor: AuthenticatedUser,
+    workbookId: string,
+  ): Promise<WorkbookSharingAuditExpectationResponse>;
   setSecureUserShare(
     actor: AuthenticatedUser,
     workbookId: string,

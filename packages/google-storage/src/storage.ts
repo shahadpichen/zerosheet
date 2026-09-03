@@ -3,6 +3,7 @@ import type { AuthorizedGoogleRequest } from "./request.js";
 import type {
   GoogleCellScalar,
   GoogleDrivePermission,
+  GoogleDrivePermissionDetails,
   GoogleReadRange,
   GoogleSheetTab,
   GoogleSpreadsheetFile,
@@ -158,6 +159,40 @@ export class GoogleWorkspaceStorage {
       }
       throw error;
     }
+  }
+
+  /**
+   * List a bounded snapshot of live Drive permissions for explicit owner
+   * review. The result is never sent to ZeroSheet automatically: unknown
+   * Google-only collaborators may be intentional, so detection must not become
+   * destructive reconciliation. Ten 100-entry pages cap memory/API work.
+   */
+  public async listPermissions(
+    spreadsheetId: string,
+  ): Promise<GoogleDrivePermissionDetails[]> {
+    assertGoogleResourceId(spreadsheetId);
+    const permissions: GoogleDrivePermissionDetails[] = [];
+    let pageToken: string | undefined;
+
+    for (let page = 0; page < 10; page += 1) {
+      const query = new URLSearchParams({
+        pageSize: "100",
+        supportsAllDrives: "true",
+        fields: "nextPageToken,permissions(id,type,role,emailAddress,deleted)",
+      });
+      if (pageToken) query.set("pageToken", pageToken);
+      const response = await this.request.send({
+        api: "drive",
+        path: `/drive/v3/files/${encodeURIComponent(spreadsheetId)}/permissions`,
+        query,
+      });
+      const parsed = parsePermissionPage(await readBoundedJson(response));
+      permissions.push(...parsed.permissions);
+      pageToken = parsed.nextPageToken;
+      if (!pageToken) return permissions;
+    }
+
+    throw new GoogleStorageError("GOOGLE_INVALID_RESPONSE");
   }
 
   /**
@@ -467,6 +502,66 @@ function parseDrivePermission(value: unknown): GoogleDrivePermission {
   }
   assertGoogleResourceId(value.id, "GOOGLE_INVALID_RESPONSE");
   return { id: value.id };
+}
+
+function parsePermissionPage(value: unknown): {
+  permissions: GoogleDrivePermissionDetails[];
+  nextPageToken?: string;
+} {
+  if (!isRecord(value) || !Array.isArray(value.permissions)) {
+    throw new GoogleStorageError("GOOGLE_INVALID_RESPONSE");
+  }
+  if (value.permissions.length > 100) {
+    throw new GoogleStorageError("GOOGLE_INVALID_RESPONSE");
+  }
+  const permissions = value.permissions.map((entry) => {
+    if (
+      !isRecord(entry) ||
+      typeof entry.id !== "string" ||
+      !["user", "group", "domain", "anyone"].includes(String(entry.type)) ||
+      ![
+        "owner",
+        "organizer",
+        "fileOrganizer",
+        "writer",
+        "commenter",
+        "reader",
+      ].includes(String(entry.role)) ||
+      (entry.deleted !== undefined && typeof entry.deleted !== "boolean") ||
+      (entry.emailAddress !== undefined &&
+        typeof entry.emailAddress !== "string")
+    ) {
+      throw new GoogleStorageError("GOOGLE_INVALID_RESPONSE");
+    }
+    assertGoogleResourceId(entry.id, "GOOGLE_INVALID_RESPONSE");
+    if (typeof entry.emailAddress === "string") {
+      try {
+        assertEmail(entry.emailAddress);
+      } catch {
+        throw new GoogleStorageError("GOOGLE_INVALID_RESPONSE");
+      }
+    }
+    return {
+      id: entry.id,
+      type: entry.type as GoogleDrivePermissionDetails["type"],
+      role: entry.role as GoogleDrivePermissionDetails["role"],
+      ...(typeof entry.emailAddress === "string"
+        ? { emailAddress: entry.emailAddress }
+        : {}),
+      deleted: entry.deleted === true,
+    };
+  });
+
+  if (value.nextPageToken === undefined) return { permissions };
+  if (
+    typeof value.nextPageToken !== "string" ||
+    value.nextPageToken.length < 1 ||
+    value.nextPageToken.length > 1_024 ||
+    containsAsciiControlCharacter(value.nextPageToken)
+  ) {
+    throw new GoogleStorageError("GOOGLE_INVALID_RESPONSE");
+  }
+  return { permissions, nextPageToken: value.nextPageToken };
 }
 
 function parseFileVersion(value: unknown): { id: string; version: string } {

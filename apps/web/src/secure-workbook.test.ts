@@ -9,6 +9,7 @@ const cryptoMocks = vi.hoisted(() => ({
 const googleMocks = vi.hoisted(() => ({
   createUserPermission: vi.fn(),
   deletePermission: vi.fn(),
+  listPermissions: vi.fn(),
 }));
 
 // The coordinator test deliberately replaces cryptographic primitives with
@@ -27,10 +28,12 @@ vi.mock("./google-storage.js", () => ({
   googleWorkspaceStorage: {
     createUserPermission: googleMocks.createUserPermission,
     deletePermission: googleMocks.deletePermission,
+    listPermissions: googleMocks.listPermissions,
   },
 }));
 
 import {
+  auditWorkbookGooglePermissions,
   SecureWorkbookClientError,
   shareEncryptedWorkbookWithUser,
 } from "./secure-workbook.js";
@@ -163,6 +166,35 @@ describe("secure workbook sharing coordinator", () => {
       new SecureWorkbookClientError("GOOGLE_PERMISSION_ROLLBACK_FAILED"),
     );
   });
+
+  it("reports missing and unmanaged Drive permissions without deleting them", async () => {
+    installApi({ secureShareStatus: 200 });
+    googleMocks.listPermissions.mockResolvedValue([
+      {
+        id: "owner_permission_13",
+        type: "user",
+        role: "owner",
+        emailAddress: "owner@example.test",
+        deleted: false,
+      },
+      {
+        id: "unmanaged_permission_13",
+        type: "domain",
+        role: "reader",
+        deleted: false,
+      },
+    ]);
+
+    await expect(
+      auditWorkbookGooglePermissions(WORKBOOK_ID),
+    ).resolves.toMatchObject({
+      matchedPermissionCount: 0,
+      missingExpectedPermissions: [{ googlePermissionId: "permission_13" }],
+      unmanagedGooglePermissions: [{ id: "unmanaged_permission_13" }],
+    });
+    expect(googleMocks.listPermissions).toHaveBeenCalledWith("google_sheet_13");
+    expect(googleMocks.deletePermission).not.toHaveBeenCalled();
+  });
 });
 
 /**
@@ -199,6 +231,26 @@ function installApi(input: { readonly secureShareStatus: number }): void {
             activeKeyVersion: 7,
             envelope: ownerEnvelope,
             pendingRotation: null,
+          }),
+        );
+      }
+      if (
+        path.endsWith(
+          `/workbooks/${WORKBOOK_ID}/secure-shares/audit-expectation`,
+        )
+      ) {
+        return Promise.resolve(
+          jsonResponse({
+            workbookId: WORKBOOK_ID,
+            googleSpreadsheetId: "google_sheet_13",
+            expectedPermissions: [
+              {
+                userId: RECIPIENT_ID,
+                email: "recipient@example.test",
+                role: "viewer",
+                googlePermissionId: "permission_13",
+              },
+            ],
           }),
         );
       }

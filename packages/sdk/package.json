@@ -1,0 +1,21 @@
+{
+  "name": "@zerosheet/sdk",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "description": "Typed client-side collection CRUD over ZeroSheet-encrypted Google Sheets.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@zerosheet/google-storage": "workspace:*",
+    "@zerosheet/sheet-core": "workspace:*"
+  }
+}

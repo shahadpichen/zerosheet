@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1.7
+
+# OpenFGA is a static Go binary in the pinned official image. Copying it into a
+# pinned Alpine runtime adds the shell required for a tiny mounted-secret loader
+# while retaining the upstream authorization engine unchanged.
+FROM openfga/openfga:v1.18.1 AS upstream
+
+FROM alpine:3.23 AS runtime
+RUN addgroup -g 65532 -S openfga && adduser -u 65532 -S -D -H -G openfga openfga
+COPY --from=upstream /openfga /openfga
+COPY --from=upstream /usr/local/bin/grpc_health_probe /usr/local/bin/grpc_health_probe
+COPY --chmod=0755 infra/docker/openfga-entrypoint.sh /usr/local/bin/zerosheet-openfga-entrypoint
+USER 65532:65532
+
+ENTRYPOINT ["/usr/local/bin/zerosheet-openfga-entrypoint"]
+CMD ["run"]

@@ -174,6 +174,21 @@ runDatabaseIntegration("PostgresWorkbookSecurityRepository", () => {
     );
 
     await expect(
+      repository.listSharingAuditExpectation(workbookId),
+    ).resolves.toEqual({
+      workbookId,
+      googleSpreadsheetId: "1Integration_Spreadsheet_123",
+      expectedPermissions: [
+        {
+          userId: recipientId,
+          email: "recipient-integration@zerosheet.local",
+          role: "viewer",
+          googlePermissionId: "1Integration_Permission_123",
+        },
+      ],
+    });
+
+    await expect(
       repository.findWorkbookAccess(workbookId, recipientId),
     ).resolves.toMatchObject({ activeKeyVersion: 1, pendingRotation: null });
     const plan = await repository.createRotationPlan(workbookId, recipientId);

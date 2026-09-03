@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1.7
+
+# The web builder uses the same pinned toolchain as the API. The runtime is a
+# static server only: browser application source and package-manager metadata do
+# not need to exist in the public edge image.
+FROM node:24.20.0-alpine3.23 AS build
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+WORKDIR /workspace
+RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
+COPY . .
+RUN --mount=type=cache,id=zerosheet-pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile
+# The trailing ellipsis is pnpm's dependency selector. A clean container has no
+# pre-existing `dist` directories, so the web app's internal workspace packages
+# must be compiled before TypeScript resolves their package exports. Building
+# only `@zerosheet/web` can appear to work on a developer machine because stale
+# local artifacts hide that dependency; this selector makes the image build
+# reproducible from an empty checkout.
+RUN pnpm --filter @zerosheet/web... build
+
+# Caddy serves immutable build assets and owns public TLS/reverse proxying. It
+# runs as its image's non-root user; only ports published by Compose are public.
+FROM caddy:2.10.2-alpine AS runtime
+COPY --from=build /workspace/apps/web/dist/ /srv/
+COPY infra/production/Caddyfile /etc/caddy/Caddyfile
+
+# The upstream image defaults to root because conventional Linux hosts require
+# a privilege to bind ports 80 and 443. Compose grants only NET_BIND_SERVICE,
+# so the process itself can be the unprivileged `nobody` account. Empty named
+# volumes inherit these directory owners on first use, allowing Caddy to renew
+# certificates without making the rest of its filesystem writable.
+RUN chown -R nobody:nobody /data /config /srv
+USER nobody:nobody

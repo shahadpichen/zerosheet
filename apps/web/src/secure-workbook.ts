@@ -6,9 +6,11 @@ import {
   WorkbookRotationPlanResponseSchema,
   WorkbookRotationResponseSchema,
   WorkbookShareResponseSchema,
+  WorkbookSharingAuditExpectationResponseSchema,
   type UserPublicEncryptionKey,
   type WorkbookKeyEnvelope,
   type WorkbookRotationPlanResponse,
+  type WorkbookSharingAuditExpectationResponse,
 } from "@zerosheet/contracts";
 import {
   createUserEncryptionIdentity,
@@ -26,6 +28,15 @@ import {
   type SheetCipherContext,
 } from "@zerosheet/sheet-core";
 import { googleWorkspaceStorage } from "./google-storage.js";
+
+export interface WorkbookGooglePermissionAudit {
+  readonly expectation: WorkbookSharingAuditExpectationResponse;
+  readonly matchedPermissionCount: number;
+  readonly missingExpectedPermissions: readonly WorkbookSharingAuditExpectationResponse["expectedPermissions"][number][];
+  readonly unmanagedGooglePermissions: Awaited<
+    ReturnType<typeof googleWorkspaceStorage.listPermissions>
+  >;
+}
 
 export class SecureWorkbookClientError extends Error {
   public constructor(
@@ -305,6 +316,50 @@ export async function shareEncryptedWorkbookWithUser(input: {
     }
     throw error;
   }
+}
+
+/**
+ * Compare ZeroSheet's owner-authorized expectation with Drive's live state in
+ * the owner's browser. Unknown permissions are reported—not removed—because a
+ * Google-only collaborator may be intentional. Deleted entries and the Drive
+ * owner are not actionable drift. No provider list is uploaded to ZeroSheet.
+ */
+export async function auditWorkbookGooglePermissions(
+  workbookId: string,
+): Promise<WorkbookGooglePermissionAudit> {
+  const expectation = await apiJson(
+    `/api/workbooks/${workbookId}/secure-shares/audit-expectation`,
+    { method: "GET" },
+    WorkbookSharingAuditExpectationResponseSchema,
+  );
+  const providerPermissions = await googleWorkspaceStorage.listPermissions(
+    expectation.googleSpreadsheetId,
+  );
+  const livePermissions = providerPermissions.filter(
+    (permission) => !permission.deleted,
+  );
+  const liveIds = new Set(livePermissions.map((permission) => permission.id));
+  const expectedIds = new Set(
+    expectation.expectedPermissions.map(
+      (permission) => permission.googlePermissionId,
+    ),
+  );
+  const missingExpectedPermissions = expectation.expectedPermissions.filter(
+    (permission) => !liveIds.has(permission.googlePermissionId),
+  );
+  const unmanagedGooglePermissions = livePermissions.filter(
+    (permission) =>
+      permission.role !== "owner" && !expectedIds.has(permission.id),
+  );
+
+  return {
+    expectation,
+    matchedPermissionCount:
+      expectation.expectedPermissions.length -
+      missingExpectedPermissions.length,
+    missingExpectedPermissions,
+    unmanagedGooglePermissions,
+  };
 }
 
 export type RotationResult =

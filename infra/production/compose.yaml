@@ -1,0 +1,397 @@
+# ZeroSheet single-node release stack
+# ===================================
+#
+# This file is an auditable RackNerd/VPS starting point, not an HA claim. Only
+# Caddy publishes host ports. PostgreSQL, Keycloak, OpenFGA, OPA, and the API
+# communicate through private Docker networks and use persistent named volumes.
+# API/OpenFGA/OPA deliberately share a pod-like network namespace so their HTTP
+# policy calls bind only to loopback; a multi-node deployment must replace that
+# optimization with SPIFFE-authenticated TLS.
+
+name: zerosheet-production
+
+x-logging: &bounded-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:?POSTGRES_ADMIN_USER is required}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      ZEROSHEET_DB_NAME: ${ZEROSHEET_DB_NAME:-zerosheet}
+      ZEROSHEET_DB_USER: ${ZEROSHEET_DB_USER:-zerosheet_app}
+      ZEROSHEET_DB_PASSWORD_FILE: /run/secrets/zerosheet_db_password
+      ZEROSHEET_AUDIT_DB_USER: ${ZEROSHEET_AUDIT_DB_USER:-zerosheet_auditor}
+      ZEROSHEET_AUDIT_DB_PASSWORD_FILE: /run/secrets/zerosheet_audit_db_password
+      KEYCLOAK_DB_NAME: ${KEYCLOAK_DB_NAME:-keycloak}
+      KEYCLOAK_DB_USER: ${KEYCLOAK_DB_USER:-keycloak_app}
+      KEYCLOAK_DB_PASSWORD_FILE: /run/secrets/keycloak_db_password
+      OPENFGA_DB_NAME: ${OPENFGA_DB_NAME:-openfga}
+      OPENFGA_DB_USER: ${OPENFGA_DB_USER:-openfga_app}
+      OPENFGA_DB_PASSWORD_FILE: /run/secrets/openfga_db_password
+    secrets:
+      - postgres_admin_password
+      - zerosheet_db_password
+      - zerosheet_audit_db_password
+      - keycloak_db_password
+      - openfga_db_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../postgres/init/10-create-service-databases.sh:/docker-entrypoint-initdb.d/10-create-service-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_ADMIN_USER} -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-320m}
+    security_opt: ["no-new-privileges:true"]
+    logging: *bounded-logging
+    networks: [data]
+
+  zerosheet-migrate:
+    image: postgres:17-alpine
+    entrypoint: ["/usr/local/bin/migrate-zerosheet"]
+    environment:
+      ZEROSHEET_DB_HOST: postgres
+      ZEROSHEET_DB_PORT: "5432"
+      ZEROSHEET_DB_NAME: ${ZEROSHEET_DB_NAME:-zerosheet}
+      ZEROSHEET_DB_USER: ${ZEROSHEET_DB_USER:-zerosheet_app}
+      ZEROSHEET_DB_PASSWORD_FILE: /run/secrets/zerosheet_db_password
+      ZEROSHEET_AUDIT_DB_USER: ${ZEROSHEET_AUDIT_DB_USER:-zerosheet_auditor}
+    secrets: [zerosheet_db_password]
+    volumes:
+      - ../postgres/migrations:/migrations:ro
+      - ../docker/migrate-production-database.sh:/usr/local/bin/migrate-zerosheet:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [data]
+
+  keycloak:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.keycloak
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${KEYCLOAK_DB_NAME:-keycloak}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER:-keycloak_app}
+      KC_DB_PASSWORD_FILE: /run/secrets/keycloak_db_password
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:?KEYCLOAK_ADMIN_USERNAME is required}
+      KC_BOOTSTRAP_ADMIN_PASSWORD_FILE: /run/secrets/keycloak_admin_password
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME: https://${ZEROSHEET_IDENTITY_DOMAIN:?ZEROSHEET_IDENTITY_DOMAIN is required}
+      KC_PROXY_HEADERS: xforwarded
+      KC_PROXY_TRUSTED_ADDRESSES: 172.29.0.0/24
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      JAVA_OPTS_KC_HEAP: -XX:InitialRAMPercentage=20 -XX:MaxRAMPercentage=60
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-zerosheet}
+      KEYCLOAK_BFF_CLIENT_ID: ${KEYCLOAK_BFF_CLIENT_ID:-zerosheet-bff}
+      KEYCLOAK_BFF_CLIENT_SECRET_FILE: /run/secrets/keycloak_bff_client_secret
+      ZEROSHEET_API_URL: https://${ZEROSHEET_DOMAIN:?ZEROSHEET_DOMAIN is required}/api
+      ZEROSHEET_WEB_URL: https://${ZEROSHEET_DOMAIN:?ZEROSHEET_DOMAIN is required}
+      GOOGLE_OIDC_CLIENT_ID: ${GOOGLE_OIDC_CLIENT_ID:?GOOGLE_OIDC_CLIENT_ID is required}
+      GOOGLE_OIDC_CLIENT_SECRET_FILE: /run/secrets/google_oidc_client_secret
+      GOOGLE_OIDC_HOSTED_DOMAIN: ${GOOGLE_OIDC_HOSTED_DOMAIN:-}
+    secrets:
+      - keycloak_db_password
+      - keycloak_admin_password
+      - keycloak_bff_client_secret
+      - google_oidc_client_secret
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          { printf 'HEAD /health/ready HTTP/1.0\r\n\r\n' >&0;
+          grep 'HTTP/1.0 200'; } 0<>/dev/tcp/localhost/9000
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 45s
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: ${KEYCLOAK_MEMORY_LIMIT:-640m}
+    security_opt: ["no-new-privileges:true"]
+    logging: *bounded-logging
+    networks: [data, services, egress]
+
+  # Docker has no first-class pod object, so this inert container owns the
+  # shared network namespace used by the API and both policy engines.
+  policy-namespace:
+    image: alpine:3.23
+    command: ["tail", "-f", "/dev/null"]
+    expose: ["3001"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    mem_limit: 16m
+    networks: [data, services, egress]
+
+  openfga-migrate:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.openfga
+    command: ["migrate"]
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI_FILE: /run/secrets/openfga_datastore_uri
+    secrets: [openfga_datastore_uri]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [data]
+
+  openfga:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.openfga
+    command: ["run"]
+    network_mode: service:policy-namespace
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI_FILE: /run/secrets/openfga_datastore_uri
+      OPENFGA_AUTHN_METHOD: preshared
+      OPENFGA_AUTHN_PRESHARED_KEYS_FILE: /run/secrets/openfga_preshared_key
+      OPENFGA_HTTP_ADDR: 127.0.0.1:8080
+      OPENFGA_GRPC_ADDR: 127.0.0.1:8081
+      OPENFGA_PLAYGROUND_ENABLED: "false"
+      OPENFGA_LOG_FORMAT: json
+    secrets: [openfga_datastore_uri, openfga_preshared_key]
+    depends_on:
+      policy-namespace:
+        condition: service_started
+      openfga-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=127.0.0.1:8081"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    mem_limit: ${OPENFGA_MEMORY_LIMIT:-160m}
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    logging: *bounded-logging
+
+  opa:
+    image: openpolicyagent/opa:1.20.1
+    command:
+      - run
+      - --server
+      - --addr=127.0.0.1:8181
+      - --log-format=json
+      - --log-level=info
+      - /policy
+    network_mode: service:policy-namespace
+    volumes: ["../opa:/policy:ro"]
+    depends_on:
+      policy-namespace:
+        condition: service_started
+    read_only: true
+    restart: unless-stopped
+    mem_limit: ${OPA_MEMORY_LIMIT:-64m}
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    logging: *bounded-logging
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.api
+    network_mode: service:policy-namespace
+    environment:
+      NODE_ENV: production
+      API_HOST: 0.0.0.0
+      API_PORT: "3001"
+      LOG_LEVEL: ${ZEROSHEET_LOG_LEVEL:-info}
+      ZEROSHEET_API_URL: https://${ZEROSHEET_DOMAIN:?ZEROSHEET_DOMAIN is required}/api
+      ZEROSHEET_WEB_URL: https://${ZEROSHEET_DOMAIN:?ZEROSHEET_DOMAIN is required}
+      ZEROSHEET_OIDC_ISSUER_URL: https://${ZEROSHEET_IDENTITY_DOMAIN:?ZEROSHEET_IDENTITY_DOMAIN is required}/realms/${KEYCLOAK_REALM:-zerosheet}
+      ZEROSHEET_COOKIE_SECURE: "true"
+      ZEROSHEET_DB_HOST: postgres
+      POSTGRES_HOST_PORT: "5432"
+      ZEROSHEET_DB_NAME: ${ZEROSHEET_DB_NAME:-zerosheet}
+      ZEROSHEET_DB_USER: ${ZEROSHEET_DB_USER:-zerosheet_app}
+      ZEROSHEET_DB_PASSWORD_FILE: /run/secrets/zerosheet_db_password
+      ZEROSHEET_DB_TLS: "false"
+      KEYCLOAK_BFF_CLIENT_ID: ${KEYCLOAK_BFF_CLIENT_ID:-zerosheet-bff}
+      KEYCLOAK_BFF_CLIENT_SECRET_FILE: /run/secrets/keycloak_bff_client_secret
+      OPENFGA_API_URL: http://127.0.0.1:8080
+      OPENFGA_STORE_ID: ${OPENFGA_STORE_ID:?Run the OpenFGA bootstrap and set OPENFGA_STORE_ID}
+      OPENFGA_AUTHORIZATION_MODEL_ID: ${OPENFGA_AUTHORIZATION_MODEL_ID:?Run the OpenFGA bootstrap and set OPENFGA_AUTHORIZATION_MODEL_ID}
+      OPENFGA_PRESHARED_KEY_FILE: /run/secrets/openfga_preshared_key
+      OPA_API_URL: http://127.0.0.1:8181
+      GOOGLE_STORAGE_OAUTH_ENABLED: ${GOOGLE_STORAGE_OAUTH_ENABLED:-false}
+      GOOGLE_STORAGE_OAUTH_CLIENT_ID: ${GOOGLE_STORAGE_OAUTH_CLIENT_ID:?GOOGLE_STORAGE_OAUTH_CLIENT_ID is required}
+      GOOGLE_STORAGE_OAUTH_CLIENT_SECRET_FILE: /run/secrets/google_storage_client_secret
+      GOOGLE_STORAGE_TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/google_storage_token_key
+    secrets:
+      - zerosheet_db_password
+      - keycloak_bff_client_secret
+      - openfga_preshared_key
+      - google_storage_client_secret
+      - google_storage_token_key
+    depends_on:
+      policy-namespace:
+        condition: service_started
+      zerosheet-migrate:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+    read_only: true
+    tmpfs: ["/tmp:size=32m,mode=1777"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: ${ZEROSHEET_API_MEMORY_LIMIT:-192m}
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    logging: *bounded-logging
+
+  # Run this profile once after OpenFGA starts. It writes `openfga.env` with
+  # non-secret IDs; copy those two values into the production environment file.
+  openfga-provision:
+    profiles: [bootstrap]
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.openfga-tools
+    network_mode: service:policy-namespace
+    environment:
+      OPENFGA_API_URL: http://127.0.0.1:8080
+      OPENFGA_PRESHARED_KEY_FILE: /run/secrets/openfga_preshared_key
+      OPENFGA_STORE_NAME: ${OPENFGA_STORE_NAME:-ZeroSheet Production}
+      OPENFGA_STATE_FILE: /output/openfga.env
+    secrets: [openfga_preshared_key]
+    volumes:
+      - ${ZEROSHEET_STATE_DIRECTORY:?ZEROSHEET_STATE_DIRECTORY is required}:/output
+    depends_on:
+      openfga:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  # Run from cron/systemd with `docker compose run --rm sharing-drift-audit`.
+  # A finding exits 2 for alerting; the job never edits product/provider state.
+  sharing-drift-audit:
+    profiles: [operations]
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.worker
+    environment:
+      ZEROSHEET_DB_HOST: postgres
+      ZEROSHEET_DB_PORT: "5432"
+      ZEROSHEET_DB_NAME: ${ZEROSHEET_DB_NAME:-zerosheet}
+      ZEROSHEET_AUDIT_DB_USER: ${ZEROSHEET_AUDIT_DB_USER:-zerosheet_auditor}
+      ZEROSHEET_AUDIT_DB_PASSWORD_FILE: /run/secrets/zerosheet_audit_db_password
+      ZEROSHEET_SHARING_DRIFT_MINUTES: ${ZEROSHEET_SHARING_DRIFT_MINUTES:-30}
+    secrets: [zerosheet_audit_db_password]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      zerosheet-migrate:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    mem_limit: 96m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [data]
+
+  caddy:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.web
+    environment:
+      ZEROSHEET_DOMAIN: ${ZEROSHEET_DOMAIN:?ZEROSHEET_DOMAIN is required}
+      ZEROSHEET_IDENTITY_DOMAIN: ${ZEROSHEET_IDENTITY_DOMAIN:?ZEROSHEET_IDENTITY_DOMAIN is required}
+      ZEROSHEET_ACME_EMAIL: ${ZEROSHEET_ACME_EMAIL:?ZEROSHEET_ACME_EMAIL is required}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      policy-namespace:
+        condition: service_started
+      keycloak:
+        condition: service_started
+    # Static assets live in the image and Caddy's mutable certificate/config
+    # state has dedicated volumes. Making the remaining root filesystem
+    # read-only limits what a public-edge process could modify after a flaw.
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    restart: unless-stopped
+    stop_grace_period: 20s
+    mem_limit: ${CADDY_MEMORY_LIMIT:-64m}
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    logging: *bounded-logging
+    networks:
+      services:
+        aliases:
+          - ${ZEROSHEET_IDENTITY_DOMAIN:?ZEROSHEET_IDENTITY_DOMAIN is required}
+      public: {}
+
+secrets:
+  postgres_admin_password:
+    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/postgres_admin_password
+  zerosheet_db_password:
+    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/zerosheet_db_password
+  zerosheet_audit_db_password:
+    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/zerosheet_audit_db_password
+  keycloak_db_password:
+    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/keycloak_db_password
+  openfga_db_password:
+    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/openfga_db_password
+  openfga_datastore_uri:
+    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/openfga_datastore_uri
+  keycloak_admin_password:
+    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/keycloak_admin_password
+  keycloak_bff_client_secret:
+    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/keycloak_bff_client_secret
+  openfga_preshared_key:
+    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/openfga_preshared_key
+  google_oidc_client_secret:
+    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/google_oidc_client_secret
+  google_storage_client_secret:
+    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/google_storage_client_secret
+  google_storage_token_key:
+    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/google_storage_token_key
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  # The explicit subnet gives Keycloak a narrow trusted reverse-proxy range.
+  services:
+    internal: true
+    ipam:
+      config: [{ subnet: 172.29.0.0/24 }]
+  data:
+    internal: true
+  egress: {}
+  public: {}

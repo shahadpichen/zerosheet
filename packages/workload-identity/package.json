@@ -6,7 +6,7 @@
   "description": "A narrow ZeroSheet adapter around the SPIFFE Workload API and exact peer-identity authorization.",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
+      "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
   },

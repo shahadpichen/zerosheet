@@ -6,10 +6,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
+    "audit:sharing": "node --env-file-if-exists=../../.env dist/sharing-drift-audit.js",
     "mtls:probe": "node dist/mtls-client.js",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@zerosheet/workload-identity": "workspace:*"
+    "@zerosheet/workload-identity": "workspace:*",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
   }
 }

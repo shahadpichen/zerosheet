@@ -173,9 +173,11 @@ The pending rotation record and envelopes allow the same owner to resume after
 a browser, provider, or network failure without inventing another key. Version
 1 supports one bounded range of at most 10,000 cells and direct users only.
 Encrypted team sharing is denied because correct membership fan-out and
-rotation on every joiner/leaver event are deferred. Multi-range rewrite,
-provider reconciliation, and automated recovery are Milestone 14 hardening
-work, not properties that the current product should claim.
+rotation on every joiner/leaver event are deferred. Milestone 14 adds aggregate
+database drift reporting and an owner-assisted provider comparison, but unknown
+Google permissions are never auto-deleted because they may be intentional.
+Multi-range rewrite and automated recovery remain future work, not properties
+that the current product should claim.
 
 ### HPKE sender authentication and public-key directory
 

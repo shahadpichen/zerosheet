@@ -418,6 +418,21 @@ class FakeWorkbookSecurityService implements WorkbookSecurityApplicationService 
     return Promise.reject(new ProductForbiddenError());
   }
 
+  public sharingAuditExpectation() {
+    return Promise.resolve({
+      workbookId: "80e4b8a8-6e79-4b9e-96f0-4f9751f86224",
+      googleSpreadsheetId: "1Google_Spreadsheet_Id_123",
+      expectedPermissions: [
+        {
+          userId: "22222222-2222-4222-8222-222222222222",
+          email: "recipient@example.com",
+          role: "viewer" as const,
+          googlePermissionId: "1Google_Permission_Id_123",
+        },
+      ],
+    });
+  }
+
   public setSecureUserShare() {
     return Promise.reject(new ProductForbiddenError());
   }
@@ -440,6 +455,9 @@ function testConfig(): RuntimeConfig {
     host: "127.0.0.1",
     port: 3001,
     logLevel: "silent",
+    // This is the externally advertised API base. Fastify injection still
+    // addresses internal paths because Caddy/Vite owns prefix stripping.
+    apiUrl: new URL("http://127.0.0.1:3001"),
     webUrl: new URL("http://127.0.0.1:5173"),
     database: {
       host: "127.0.0.1",
@@ -1169,5 +1187,25 @@ describe("ZeroSheet encrypted workbook boundary", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({ error: "invalid_request" });
+  });
+
+  it("returns a no-store permission expectation to an authenticated manager", async () => {
+    const setup = makeApp();
+    setup.service.user = testUser;
+    apps.push(setup.app);
+
+    const response = await setup.app.inject({
+      method: "GET",
+      url: "/workbooks/80e4b8a8-6e79-4b9e-96f0-4f9751f86224/secure-shares/audit-expectation",
+      cookies: { zerosheet_session: "opaque-browser-session" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.json()).toMatchObject({
+      expectedPermissions: [
+        { googlePermissionId: "1Google_Permission_Id_123" },
+      ],
+    });
   });
 });

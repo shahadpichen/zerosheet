@@ -1,0 +1,25 @@
+# syntax=docker/dockerfile:1.7
+
+# The worker is deployed independently from the API so a scheduled aggregate
+# audit never expands the public server's process or database privileges.
+FROM node:24.20.0-alpine3.23 AS build
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+WORKDIR /workspace
+RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
+COPY . .
+RUN --mount=type=cache,id=zerosheet-pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile
+RUN pnpm build
+RUN pnpm --filter @zerosheet/worker deploy --prod --legacy /output/worker
+RUN node infra/scripts/prepare-deployed-workspace-packages.mjs /output/worker
+RUN node -e "await import('/output/worker/dist/sharing-drift-repository.js')"
+
+FROM node:24.20.0-alpine3.23 AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build --chown=node:node /output/worker/ /app/
+USER node
+
+CMD ["node", "dist/sharing-drift-audit.js"]

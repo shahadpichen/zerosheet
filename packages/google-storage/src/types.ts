@@ -56,3 +56,17 @@ export interface GoogleSheetTab {
 export interface GoogleDrivePermission {
   readonly id: string;
 }
+
+/**
+ * Read-only provider metadata used for owner-assisted drift review. It carries
+ * no access token or workbook content. Email is optional because Drive omits it
+ * for domain/anyone grants and some deleted identities.
+ */
+export interface GoogleDrivePermissionDetails {
+  readonly id: string;
+  readonly type: "user" | "group" | "domain" | "anyone";
+  readonly role:
+    "owner" | "organizer" | "fileOrganizer" | "writer" | "commenter" | "reader";
+  readonly emailAddress?: string;
+  readonly deleted: boolean;
+}

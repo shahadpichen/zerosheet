@@ -135,6 +135,35 @@ importers:
       "@zerosheet/workload-identity":
         specifier: workspace:*
         version: link:../../packages/workload-identity
+      pg:
+        specifier: ^8.23.0
+        version: 8.23.0
+    devDependencies:
+      "@types/pg":
+        specifier: ^8.23.1
+        version: 8.23.1
+
+  examples/encrypted-crm:
+    dependencies:
+      "@zerosheet/sdk":
+        specifier: workspace:*
+        version: link:../../packages/sdk
+      "@zerosheet/sheet-core":
+        specifier: workspace:*
+        version: link:../../packages/sheet-core
+      react:
+        specifier: ^19.0.0
+        version: 19.2.8
+    devDependencies:
+      "@types/react":
+        specifier: ^19.0.0
+        version: 19.2.18
+
+  examples/mvp-backend:
+    dependencies:
+      "@zerosheet/sdk":
+        specifier: workspace:*
+        version: link:../../packages/sdk
 
   packages/contracts:
     dependencies:
@@ -152,6 +181,15 @@ importers:
         version: 0.4.0
 
   packages/google-storage: {}
+
+  packages/sdk:
+    dependencies:
+      "@zerosheet/google-storage":
+        specifier: workspace:*
+        version: link:../google-storage
+      "@zerosheet/sheet-core":
+        specifier: workspace:*
+        version: link:../sheet-core
 
   packages/sheet-core:
     dependencies:

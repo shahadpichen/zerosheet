@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1.7
+
+# This image contains administrative tools only and is never a long-running
+# production service. The pinned official CLI validates/transforms the model;
+# Node performs the narrow idempotent REST workflow already used by the lab.
+FROM openfga/cli:v0.7.20 AS fga-cli
+
+FROM node:24.20.0-alpine3.23 AS runtime
+WORKDIR /output
+COPY --from=fga-cli /fga /usr/local/bin/fga
+COPY infra/openfga/model.fga /tools/model.fga
+COPY infra/openfga/provision-authorization-model.mjs /tools/provision-authorization-model.mjs
+COPY --chmod=0755 infra/docker/openfga-provisioner-entrypoint.sh /usr/local/bin/zerosheet-openfga-provision
+USER node
+
+ENTRYPOINT ["/usr/local/bin/zerosheet-openfga-provision"]

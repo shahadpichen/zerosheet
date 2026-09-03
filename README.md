@@ -13,12 +13,13 @@ The product will combine:
 
 ## Current milestone
 
-Milestone 13 adds the secure multi-user workbook-key lifecycle. The browser
-creates each user's HPKE identity, keeps the recovery phrase and usable private
-key outside the server, stores the creator's envelope before the first Google
-write, and coordinates direct sharing across Google Drive, the ZeroSheet API,
-and OpenFGA. Revocation uses resumable workbook-key rotation so a removed user
-does not receive future ciphertext versions.
+Milestone 14 adds a bounded TypeScript record SDK, five-minute quickstart,
+encrypted CRM and backend examples, database/provider sharing-drift visibility,
+plain-Node deploy smoke tests, and a hardened single-node alpha stack for the
+initial VPS. It includes mounted secrets, same-origin Caddy TLS, isolated
+service databases, encrypted backup/restore tooling, resource limits, and one
+executable release checklist—without claiming the 2 GB topology is highly
+available production.
 
 ## Repository layout
 
@@ -32,6 +33,7 @@ packages/
   crypto/             Browser recovery, HPKE, workbook keys, and encrypted cells
   google-storage/     Fixed-origin browser Drive and Sheets adapter
   sheet-core/         Selective protection, cell codec, and safe sync sessions
+  sdk/                Bounded encrypted record collections over Google tabs
   workload-identity/  SPIFFE Workload API and exact peer checks
 docs/
   architecture/       System boundaries and decisions
@@ -39,6 +41,7 @@ docs/
   security/           Threat model and residual risks
   specifications/     Persistent format contracts and test vectors
 infra/                Local and production infrastructure
+examples/             Encrypted CRM UI and typed backend integration
 ```
 
 ## Requirements
@@ -66,6 +69,7 @@ pnpm crypto:benchmark:cells
 pnpm infra:google-storage:verify
 pnpm sheet:benchmark:sync
 pnpm infra:sharing:verify
+pnpm infra:release:verify
 pnpm typecheck
 pnpm test
 pnpm dev
@@ -121,6 +125,11 @@ immutable autosave queue, and Google conflict limitations are explained in
 The user HPKE directory, safe first write, three-part sharing transaction,
 failure rollback, and resumable key rotation are explained in
 [`docs/learning/13-secure-workbook-sharing.md`](docs/learning/13-secure-workbook-sharing.md).
+
+The SDK record model, quickstart/examples, drift visibility, production image
+boundary, RackNerd-style single-node bootstrap, mounted secrets, and encrypted
+backup/restore drill are explained in
+[`docs/learning/14-developer-sdk-production-release.md`](docs/learning/14-developer-sdk-production-release.md).
 
 The persistent cell contract and security analysis live in
 [`docs/specifications/encrypted-cell-v1.md`](docs/specifications/encrypted-cell-v1.md)

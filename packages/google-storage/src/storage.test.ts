@@ -191,6 +191,65 @@ describe("GoogleWorkspaceStorage", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("lists a bounded paginated permission snapshot for drift review", async () => {
+    const { storage, fetchMock } = storageWithResponses(
+      Response.json({
+        permissions: [
+          {
+            id: "1Owner_Permission_Id_123",
+            type: "user",
+            role: "owner",
+            emailAddress: "owner@example.com",
+          },
+          {
+            id: "1Expected_Permission_123",
+            type: "user",
+            role: "reader",
+            emailAddress: "reader@example.com",
+          },
+        ],
+        nextPageToken: "page-two",
+      }),
+      Response.json({
+        permissions: [
+          {
+            id: "1Domain_Permission_Id_123",
+            type: "domain",
+            role: "reader",
+          },
+        ],
+      }),
+    );
+
+    await expect(storage.listPermissions(spreadsheetId)).resolves.toEqual([
+      {
+        id: "1Owner_Permission_Id_123",
+        type: "user",
+        role: "owner",
+        emailAddress: "owner@example.com",
+        deleted: false,
+      },
+      {
+        id: "1Expected_Permission_123",
+        type: "user",
+        role: "reader",
+        emailAddress: "reader@example.com",
+        deleted: false,
+      },
+      {
+        id: "1Domain_Permission_Id_123",
+        type: "domain",
+        role: "reader",
+        deleted: false,
+      },
+    ]);
+    const secondUrl = fetchMock.mock.calls[1]?.[0] as URL;
+    expect(secondUrl.searchParams.get("pageToken")).toBe("page-two");
+    expect(secondUrl.searchParams.get("fields")).not.toContain(
+      "permissionDetails",
+    );
+  });
+
   it("creates and reads only an encrypted backup in appDataFolder", async () => {
     const encryptedBackup = new Uint8Array([90, 83, 1, 222, 173, 190, 239]);
     const { storage, fetchMock } = storageWithResponses(

@@ -15,6 +15,7 @@ export {
   type GoogleAccessTokenProvider,
   type GoogleCellScalar,
   type GoogleDrivePermission,
+  type GoogleDrivePermissionDetails,
   type GoogleReadRange,
   type GoogleSheetTab,
   type GoogleSpreadsheetFile,

@@ -1,0 +1,14 @@
+{
+  "name": "@zerosheet/example-mvp-backend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@zerosheet/sdk": "workspace:*"
+  }
+}

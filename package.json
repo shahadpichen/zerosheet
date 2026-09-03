@@ -35,6 +35,8 @@
     "infra:google-storage:verify": "bash infra/scripts/verify-google-storage-foundation.sh",
     "infra:sheet-editor:verify": "bash infra/scripts/verify-encrypted-sheet-editor.sh",
     "infra:sharing:verify": "bash infra/scripts/verify-secure-workbook-sharing.sh",
+    "infra:release:verify": "bash infra/scripts/verify-developer-sdk-release.sh",
+    "infra:production:config": "docker compose --env-file infra/production/environment.example --file infra/production/compose.yaml --profile bootstrap --profile operations config --quiet",
     "infra:product:verify": "bash infra/scripts/verify-product-authorization-lifecycle.sh",
     "infra:oidc:verify": "bash infra/scripts/verify-oidc-bff.sh",
     "infra:workload-identity:config": "docker compose --env-file .env --file infra/compose.yaml --profile workload-identity-lab --profile workload-identity-probes config --quiet",

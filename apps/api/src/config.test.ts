@@ -56,6 +56,27 @@ describe("loadRuntimeConfig", () => {
     });
   });
 
+  it("preserves an API reverse-proxy prefix in OAuth callback URLs", () => {
+    const environment = {
+      ...validEnvironment(),
+      NODE_ENV: "production",
+      ZEROSHEET_API_URL: "https://zerosheet.example/api",
+      ZEROSHEET_WEB_URL: "https://zerosheet.example",
+      ZEROSHEET_OIDC_ISSUER_URL:
+        "https://identity.zerosheet.example/realms/zerosheet",
+      OPENFGA_API_URL: "https://authorization.zerosheet.example",
+      OPA_API_URL: "https://policy.zerosheet.example",
+    };
+
+    const config = loadRuntimeConfig(environment);
+    expect(config.oidc.callbackUrl.href).toBe(
+      "https://zerosheet.example/api/auth/callback",
+    );
+    expect(config.googleStorage.callbackUrl.href).toBe(
+      "https://zerosheet.example/api/google/storage/callback",
+    );
+  });
+
   it("refuses insecure cookies in production", () => {
     expect(() =>
       loadRuntimeConfig({
@@ -94,6 +115,87 @@ describe("loadRuntimeConfig", () => {
     expect(() => loadRuntimeConfig(environment)).toThrow(
       /KEYCLOAK_BFF_CLIENT_SECRET/u,
     );
+  });
+
+  it("loads sensitive values from absolute mounted files", () => {
+    const environment = validEnvironment();
+    delete environment.ZEROSHEET_DB_PASSWORD;
+    delete environment.KEYCLOAK_BFF_CLIENT_SECRET;
+    delete environment.OPENFGA_PRESHARED_KEY;
+    environment.ZEROSHEET_DB_PASSWORD_FILE = "/run/secrets/database_password";
+    environment.KEYCLOAK_BFF_CLIENT_SECRET_FILE =
+      "/run/secrets/bff_client_secret";
+    environment.OPENFGA_PRESHARED_KEY_FILE = "/run/secrets/openfga_key";
+
+    const values = new Map([
+      ["/run/secrets/database_password", "database-value\n"],
+      ["/run/secrets/bff_client_secret", "client-value\n"],
+      ["/run/secrets/openfga_key", "authorization-value\n"],
+    ]);
+    const config = loadRuntimeConfig(environment, (path) => {
+      const value = values.get(path);
+      if (value === undefined) throw new Error("missing test fixture");
+      return value;
+    });
+
+    expect(config.database.password).toBe("database-value");
+    expect(config.oidc.clientSecret).toBe("client-value");
+    expect(config.authorization.apiToken).toBe("authorization-value");
+  });
+
+  it("rejects ambiguous, relative, and multiline secret sources", () => {
+    expect(() =>
+      loadRuntimeConfig({
+        ...validEnvironment(),
+        KEYCLOAK_BFF_CLIENT_SECRET_FILE: "/run/secrets/bff_client_secret",
+      }),
+    ).toThrow(/cannot both be set/u);
+
+    const relative = validEnvironment();
+    delete relative.KEYCLOAK_BFF_CLIENT_SECRET;
+    relative.KEYCLOAK_BFF_CLIENT_SECRET_FILE = "secrets/bff_client_secret";
+    expect(() => loadRuntimeConfig(relative, () => "value\n")).toThrow(
+      /absolute path/u,
+    );
+
+    const multiline = validEnvironment();
+    delete multiline.KEYCLOAK_BFF_CLIENT_SECRET;
+    multiline.KEYCLOAK_BFF_CLIENT_SECRET_FILE =
+      "/run/secrets/bff_client_secret";
+    expect(() => loadRuntimeConfig(multiline, () => "first\nsecond\n")).toThrow(
+      /one non-empty secret value/u,
+    );
+  });
+
+  it("requires the browser and API to share a production origin", () => {
+    expect(() =>
+      loadRuntimeConfig({
+        ...validEnvironment(),
+        NODE_ENV: "production",
+        ZEROSHEET_API_URL: "https://api.zerosheet.example",
+        ZEROSHEET_WEB_URL: "https://zerosheet.example",
+        ZEROSHEET_OIDC_ISSUER_URL:
+          "https://identity.zerosheet.example/realms/zerosheet",
+        OPENFGA_API_URL: "https://authorization.zerosheet.example",
+        OPA_API_URL: "https://policy.zerosheet.example",
+      }),
+    ).toThrow(/same origin/u);
+  });
+
+  it("allows only loopback HTTP for co-located production policy engines", () => {
+    const config = loadRuntimeConfig({
+      ...validEnvironment(),
+      NODE_ENV: "production",
+      ZEROSHEET_API_URL: "https://zerosheet.example/api",
+      ZEROSHEET_WEB_URL: "https://zerosheet.example",
+      ZEROSHEET_OIDC_ISSUER_URL:
+        "https://identity.zerosheet.example/realms/zerosheet",
+      OPENFGA_API_URL: "http://127.0.0.1:8080",
+      OPA_API_URL: "http://127.0.0.1:8181",
+    });
+
+    expect(config.authorization.allowInsecureHttp).toBe(true);
+    expect(config.contextualAuthorization.allowInsecureHttp).toBe(true);
   });
 
   it("refuses a non-loopback insecure authorization decision service", () => {
@@ -149,6 +251,29 @@ describe("loadRuntimeConfig", () => {
         ? config.googleStorage.tokenEncryptionKey.byteLength
         : 0,
     ).toBe(32);
+  });
+
+  it("loads the Google OAuth secrets and token key from mounted files", () => {
+    const environment = {
+      ...validEnvironment(),
+      GOOGLE_STORAGE_OAUTH_ENABLED: "true",
+      GOOGLE_STORAGE_OAUTH_CLIENT_ID:
+        "storage-client.apps.googleusercontent.com",
+      GOOGLE_STORAGE_OAUTH_CLIENT_SECRET_FILE:
+        "/run/secrets/google_storage_client_secret",
+      GOOGLE_STORAGE_TOKEN_ENCRYPTION_KEY_FILE:
+        "/run/secrets/google_storage_token_key",
+    };
+    const config = loadRuntimeConfig(environment, (path) =>
+      path.endsWith("client_secret")
+        ? "google-secret\n"
+        : "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n",
+    );
+
+    expect(config.googleStorage).toMatchObject({
+      enabled: true,
+      clientSecret: "google-secret",
+    });
   });
 
   it("rejects a malformed Google refresh-token encryption key", () => {

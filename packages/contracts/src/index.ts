@@ -318,6 +318,28 @@ export const WorkbookRotationPlanResponseSchema = z.object({
 });
 
 /**
+ * An owner-assisted provider audit compares this server-side expectation with
+ * Google Drive's live permission list in the browser. It contains no envelope,
+ * key material, or token. The owner already has sharing-management permission
+ * and needs the address to decide whether an unmanaged Google grant is
+ * intentional; the response remains `no-store` at the route boundary.
+ */
+export const WorkbookSharingAuditExpectationResponseSchema = z.object({
+  workbookId: z.string().uuid(),
+  googleSpreadsheetId: z.string().regex(/^[A-Za-z0-9_-]{10,256}$/u),
+  expectedPermissions: z
+    .array(
+      z.object({
+        userId: z.string().uuid(),
+        email: z.string().email(),
+        role: z.enum(["editor", "viewer"]),
+        googlePermissionId: z.string().regex(/^[A-Za-z0-9_-]{3,256}$/u),
+      }),
+    )
+    .max(10_000),
+});
+
+/**
  * Google storage status never returns a Google account token or provider user
  * profile. The browser only needs to know whether the independent Drive grant
  * exists and whether its required narrow scopes are still recorded.
@@ -428,6 +450,9 @@ export type WorkbookRotationResponse = z.infer<
 >;
 export type WorkbookRotationPlanResponse = z.infer<
   typeof WorkbookRotationPlanResponseSchema
+>;
+export type WorkbookSharingAuditExpectationResponse = z.infer<
+  typeof WorkbookSharingAuditExpectationResponseSchema
 >;
 export type GoogleStorageConnectionStatus = z.infer<
   typeof GoogleStorageConnectionStatusSchema

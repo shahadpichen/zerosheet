@@ -26,14 +26,20 @@ PostgreSQL has no profile so Docker Compose can treat it as the shared datastore
 
 ## Secret boundary
 
-`.env.example` is documentation containing only local placeholders. The ignored `.env` supplies local values to Compose. RackNerd production will use root-owned mounted secret files instead; development-mode passwords must never be reused.
+`.env.example` is documentation containing only local placeholders. The ignored
+`.env` supplies local values to Compose. The single-node alpha stack in
+`production/compose.yaml` uses mounted files inside a root-only secret directory;
+development passwords must never be reused. Its API understands `NAME_FILE`,
+while narrow entrypoints adapt Keycloak/OpenFGA configuration to those files
+without printing their contents.
 
 ## Persistence boundary
 
 The named `postgres_data` volume survives `docker compose down`. SPIRE server,
 agent, and socket state use separate named volumes with different trust and
-lifecycle requirements. None of these volumes is a backup. A future milestone
-adds encrypted off-site dumps and a restore drill before public beta.
+lifecycle requirements. None of these volumes is a backup. Milestone 14 adds
+age-encrypted logical dumps plus a restore drill that targets only a disposable
+networkless database; operators must schedule it and move results off-site.
 
 ## ZeroSheet schema migrations
 
@@ -118,3 +124,11 @@ The mTLS API's TCP 3443 declaration is internal-only and has no host mapping.
 Production will place equivalent workload listeners on an explicitly isolated
 network and retain exact ID allowlists; private network placement alone is not
 authentication.
+
+Milestone 14 adds `pnpm infra:release:verify` and the production-shaped Compose
+topology. For the single node, API/OpenFGA/OPA share a network namespace and the
+PDPs bind to loopback. This is not permission to use plaintext across hosts;
+separated workloads must use the SPIFFE/mTLS boundary from Milestone 9. The
+one-shot drift worker can execute only an aggregate database function, and an
+owner-assisted browser comparison surfaces Google-only permissions without
+automatically deleting them.

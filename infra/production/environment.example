@@ -1,0 +1,49 @@
+# Copy this file to a root-owned path outside the Git checkout. Docker Compose
+# reads names and non-secret IDs here; credential values live in individual
+# files under ZEROSHEET_SECRET_DIRECTORY and never in this document.
+ZEROSHEET_DOMAIN=sheets.example.com
+ZEROSHEET_IDENTITY_DOMAIN=identity.example.com
+ZEROSHEET_ACME_EMAIL=operator@example.com
+
+# Use absolute host paths. `state` receives only the generated non-secret
+# OpenFGA IDs; `secrets` must be backed up through an encrypted secret manager.
+ZEROSHEET_SECRET_DIRECTORY=/etc/zerosheet/secrets
+ZEROSHEET_STATE_DIRECTORY=/var/lib/zerosheet/state
+
+POSTGRES_ADMIN_USER=zerosheet_admin
+ZEROSHEET_DB_NAME=zerosheet
+ZEROSHEET_DB_USER=zerosheet_app
+ZEROSHEET_AUDIT_DB_USER=zerosheet_auditor
+KEYCLOAK_DB_NAME=keycloak
+KEYCLOAK_DB_USER=keycloak_app
+OPENFGA_DB_NAME=openfga
+OPENFGA_DB_USER=openfga_app
+
+KEYCLOAK_REALM=zerosheet
+KEYCLOAK_ADMIN_USERNAME=zerosheet-admin
+KEYCLOAK_BFF_CLIENT_ID=zerosheet-bff
+OPENFGA_STORE_NAME=ZeroSheet Production
+
+# Replace these after the bootstrap profile writes openfga.env. They are public
+# immutable identifiers, but the API refuses placeholders or malformed IDs.
+OPENFGA_STORE_ID=01H00000000000000000000000
+OPENFGA_AUTHORIZATION_MODEL_ID=01H00000000000000000000001
+
+# Google sign-in (Keycloak) and Google storage (ZeroSheet) are separate OAuth
+# clients. Start with both disabled/placeholder credentials, then follow the
+# Cloud Console checklist before enabling either production integration.
+GOOGLE_OIDC_CLIENT_ID=replace-with-google-sign-in-client.apps.googleusercontent.com
+GOOGLE_OIDC_HOSTED_DOMAIN=
+GOOGLE_STORAGE_OAUTH_ENABLED=false
+GOOGLE_STORAGE_OAUTH_CLIENT_ID=replace-with-google-storage-client.apps.googleusercontent.com
+
+# Conservative limits fit the application stack close to a 2 GB VPS boundary.
+# That size is suitable for a learning/alpha node, not HA or a traffic SLA.
+POSTGRES_MEMORY_LIMIT=320m
+KEYCLOAK_MEMORY_LIMIT=640m
+OPENFGA_MEMORY_LIMIT=160m
+OPA_MEMORY_LIMIT=64m
+ZEROSHEET_API_MEMORY_LIMIT=192m
+CADDY_MEMORY_LIMIT=64m
+ZEROSHEET_LOG_LEVEL=info
+ZEROSHEET_SHARING_DRIFT_MINUTES=30

@@ -131,6 +131,18 @@ export class WorkbookSecurityService implements WorkbookSecurityApplicationServi
     return access;
   }
 
+  public async sharingAuditExpectation(
+    actor: AuthenticatedUser,
+    workbookId: string,
+  ) {
+    await this.requireWorkbookPermission(
+      actor,
+      workbookId,
+      "can_manage_sharing",
+    );
+    return this.#repository.listSharingAuditExpectation(workbookId);
+  }
+
   public async setSecureUserShare(
     actor: AuthenticatedUser,
     workbookId: string,

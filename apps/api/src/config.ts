@@ -76,6 +76,8 @@ export interface RuntimeConfig {
   host: string;
   port: number;
   logLevel: string;
+  /** Public API base, including an optional reverse-proxy path such as /api. */
+  apiUrl: URL;
   webUrl: URL;
   database: DatabaseConfig;
   oidc: OidcConfig;
@@ -86,11 +88,78 @@ export interface RuntimeConfig {
   authCookies: AuthCookieConfig;
 }
 
+/**
+ * Secret-file reading is injected in tests so configuration behavior can be
+ * proven without creating real credential files. Production uses the small
+ * synchronous reader below only once, before the server accepts traffic.
+ */
+export type SecretFileReader = (path: string) => string;
+
+const readUtf8SecretFile: SecretFileReader = (path) =>
+  readFileSync(path, { encoding: "utf8" });
+
+const MAX_SECRET_CHARACTERS = 65_536;
+
 function required(environment: NodeJS.ProcessEnv, name: string): string {
   const value = environment[name]?.trim();
 
   if (!value) {
     throw new Error(`${name} is required`);
+  }
+
+  return value;
+}
+
+/**
+ * Read a sensitive value from either NAME or NAME_FILE, never both. Compose
+ * secrets are mounted as files under `/run/secrets`; accepting the `_FILE`
+ * convention keeps credentials out of container environment inspection. An
+ * absolute path is mandatory so a changed working directory cannot redirect a
+ * production process to a different file. The function never includes file
+ * contents or an operating-system error message in its own error text.
+ */
+function requiredSecret(
+  environment: NodeJS.ProcessEnv,
+  name: string,
+  readSecretFile: SecretFileReader,
+): string {
+  const directValue = environment[name]?.trim();
+  const fileVariable = `${name}_FILE`;
+  const filePath = environment[fileVariable]?.trim();
+
+  if (directValue && filePath) {
+    throw new Error(`${name} and ${fileVariable} cannot both be set`);
+  }
+
+  if (directValue) {
+    return directValue;
+  }
+
+  if (!filePath) {
+    throw new Error(`${name} or ${fileVariable} is required`);
+  }
+
+  if (!isAbsolute(filePath)) {
+    throw new Error(`${fileVariable} must be an absolute path`);
+  }
+
+  let document: string;
+  try {
+    document = readSecretFile(filePath);
+  } catch {
+    throw new Error(`${fileVariable} could not be read`);
+  }
+
+  if (document.length > MAX_SECRET_CHARACTERS) {
+    throw new Error(`${fileVariable} exceeds the supported secret size`);
+  }
+
+  // Secret-management tools commonly add exactly one final line ending. Only
+  // that delimiter is removed; embedded newlines and NUL bytes are rejected so
+  // a mistakenly mounted document cannot silently become a credential.
+  const value = document.replace(/\r?\n$/u, "");
+  if (!value || /[\r\n\0]/u.test(value)) {
+    throw new Error(`${fileVariable} must contain one non-empty secret value`);
   }
 
   return value;
@@ -146,6 +215,20 @@ function urlValue(environment: NodeJS.ProcessEnv, name: string): URL {
   } catch {
     throw new Error(`${name} must be an absolute URL`);
   }
+}
+
+/**
+ * Append a route to a configured public service base while preserving an
+ * optional reverse-proxy prefix. For example, `https://example.test/api`
+ * becomes `https://example.test/api/auth/callback`; a leading slash passed to
+ * `new URL()` directly would incorrectly discard `/api`.
+ */
+function childUrl(baseUrl: URL, route: string): URL {
+  const normalizedBase = new URL(baseUrl.href);
+  normalizedBase.pathname = `${normalizedBase.pathname.replace(/\/+$/u, "")}/`;
+  normalizedBase.search = "";
+  normalizedBase.hash = "";
+  return new URL(route.replace(/^\/+/, ""), normalizedBase);
 }
 
 function isLoopbackHostname(hostname: string): boolean {
@@ -204,8 +287,9 @@ function cookieNames(
 function base64UrlKey(
   environment: NodeJS.ProcessEnv,
   name: string,
+  readSecretFile: SecretFileReader,
 ): Uint8Array {
-  const value = required(environment, name);
+  const value = requiredSecret(environment, name, readSecretFile);
   if (!/^[A-Za-z0-9_-]{43}$/u.test(value)) {
     throw new Error(`${name} must be unpadded base64url for exactly 32 bytes`);
   }
@@ -220,6 +304,7 @@ function base64UrlKey(
 
 export function loadRuntimeConfig(
   environment: NodeJS.ProcessEnv = process.env,
+  readSecretFile: SecretFileReader = readUtf8SecretFile,
 ): RuntimeConfig {
   const nodeEnvironment = environment.NODE_ENV?.trim() || "development";
   const secureCookies = booleanValue(
@@ -246,7 +331,7 @@ export function loadRuntimeConfig(
     false,
   );
   const googleStorageBase = {
-    callbackUrl: new URL("/google/storage/callback", apiUrl),
+    callbackUrl: childUrl(apiUrl, "google/storage/callback"),
     transactionSeconds: positiveInteger(
       environment,
       "GOOGLE_STORAGE_OAUTH_TRANSACTION_TTL_SECONDS",
@@ -260,6 +345,12 @@ export function loadRuntimeConfig(
   ) {
     throw new Error(
       "ZEROSHEET_API_URL and ZEROSHEET_WEB_URL must use HTTPS when NODE_ENV is production",
+    );
+  }
+
+  if (nodeEnvironment === "production" && apiUrl.origin !== webUrl.origin) {
+    throw new Error(
+      "ZEROSHEET_API_URL and ZEROSHEET_WEB_URL must use the same origin in production",
     );
   }
 
@@ -286,7 +377,6 @@ export function loadRuntimeConfig(
    * local exception in a later milestone.
    */
   const allowInsecureOpenFgaHttp =
-    nodeEnvironment !== "production" &&
     openFgaApiUrl.protocol === "http:" &&
     isLoopbackHostname(openFgaApiUrl.hostname);
 
@@ -299,12 +389,13 @@ export function loadRuntimeConfig(
   /**
    * OPA receives account/tenant status and the OpenFGA decision, all of which
    * are sensitive authorization metadata. Plain HTTP is therefore allowed
-   * only for the loopback-bound local lab, matching the OpenFGA boundary.
+   * only for a loopback-bound process. The single-node release deliberately
+   * places the API, OpenFGA, and OPA in one pod-like network namespace so these
+   * URLs cannot leave the host or even the namespace. Multi-node deployment
+   * must use HTTPS/mTLS instead of widening this exception.
    */
   const allowInsecureOpaHttp =
-    nodeEnvironment !== "production" &&
-    opaApiUrl.protocol === "http:" &&
-    isLoopbackHostname(opaApiUrl.hostname);
+    opaApiUrl.protocol === "http:" && isLoopbackHostname(opaApiUrl.hostname);
 
   if (opaApiUrl.protocol !== "https:" && !allowInsecureOpaHttp) {
     throw new Error(
@@ -316,21 +407,30 @@ export function loadRuntimeConfig(
     host: environment.API_HOST?.trim() || "127.0.0.1",
     port: positiveInteger(environment, "API_PORT", 3001),
     logLevel: environment.LOG_LEVEL?.trim() || "info",
+    apiUrl,
     webUrl,
     database: {
       host: environment.ZEROSHEET_DB_HOST?.trim() || "127.0.0.1",
       port: positiveInteger(environment, "POSTGRES_HOST_PORT", 5434),
       database: required(environment, "ZEROSHEET_DB_NAME"),
       user: required(environment, "ZEROSHEET_DB_USER"),
-      password: required(environment, "ZEROSHEET_DB_PASSWORD"),
+      password: requiredSecret(
+        environment,
+        "ZEROSHEET_DB_PASSWORD",
+        readSecretFile,
+      ),
       useTls: booleanValue(environment, "ZEROSHEET_DB_TLS", false),
     },
     oidc: {
       issuerUrl,
       allowInsecureHttp,
       clientId: required(environment, "KEYCLOAK_BFF_CLIENT_ID"),
-      clientSecret: required(environment, "KEYCLOAK_BFF_CLIENT_SECRET"),
-      callbackUrl: new URL("/auth/callback", apiUrl),
+      clientSecret: requiredSecret(
+        environment,
+        "KEYCLOAK_BFF_CLIENT_SECRET",
+        readSecretFile,
+      ),
+      callbackUrl: childUrl(apiUrl, "auth/callback"),
       postLogoutRedirectUrl: new URL("/", webUrl),
     },
     authorization: {
@@ -341,7 +441,11 @@ export function loadRuntimeConfig(
         environment,
         "OPENFGA_AUTHORIZATION_MODEL_ID",
       ),
-      apiToken: required(environment, "OPENFGA_PRESHARED_KEY"),
+      apiToken: requiredSecret(
+        environment,
+        "OPENFGA_PRESHARED_KEY",
+        readSecretFile,
+      ),
     },
     contextualAuthorization: {
       apiUrl: opaApiUrl,
@@ -357,13 +461,15 @@ export function loadRuntimeConfig(
           enabled: true,
           ...googleStorageBase,
           clientId: required(environment, "GOOGLE_STORAGE_OAUTH_CLIENT_ID"),
-          clientSecret: required(
+          clientSecret: requiredSecret(
             environment,
             "GOOGLE_STORAGE_OAUTH_CLIENT_SECRET",
+            readSecretFile,
           ),
           tokenEncryptionKey: base64UrlKey(
             environment,
             "GOOGLE_STORAGE_TOKEN_ENCRYPTION_KEY",
+            readSecretFile,
           ),
         }
       : { enabled: false, ...googleStorageBase },
@@ -385,3 +491,5 @@ export function loadRuntimeConfig(
     },
   };
 }
+import { readFileSync } from "node:fs";
+import { isAbsolute } from "node:path";

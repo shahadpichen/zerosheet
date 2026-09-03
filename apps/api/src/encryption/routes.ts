@@ -17,6 +17,7 @@ import {
   WorkbookRotationResponseSchema,
   WorkbookShareParametersSchema,
   WorkbookShareResponseSchema,
+  WorkbookSharingAuditExpectationResponseSchema,
 } from "@zerosheet/contracts";
 import type { AuthenticatedUser } from "@zerosheet/contracts";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -172,6 +173,24 @@ export function registerWorkbookSecurityRoutes(
             parameters.data.workbookId,
             parameters.data.principalId,
             body.data,
+          ),
+        ),
+      );
+    },
+  );
+
+  app.get(
+    "/workbooks/:workbookId/secure-shares/audit-expectation",
+    async (request, reply) => {
+      const actor = await authenticatedUser(request, reply, options);
+      const parameters = WorkbookParametersSchema.safeParse(request.params);
+      if (!actor) return reply;
+      if (!parameters.success) return invalidRequest(reply);
+      return execute(reply, async () =>
+        WorkbookSharingAuditExpectationResponseSchema.parse(
+          await options.security.sharingAuditExpectation(
+            actor,
+            parameters.data.workbookId,
           ),
         ),
       );

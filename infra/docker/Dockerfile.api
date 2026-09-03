@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1.7
+
+# Build and runtime stages are separated so the final API image contains no
+# compiler, source tree, pnpm store, or development dependency. Exact major and
+# patch versions make the artifact reproducible and keep Node 24 consistent
+# with the repository's supported runtime.
+FROM node:24.20.0-alpine3.23 AS build
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+WORKDIR /workspace
+
+# Corepack supplies the package-manager version committed in package.json.
+# BuildKit's cache mount speeds later builds without copying the package cache
+# into an image layer or into the runtime stage.
+RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
+COPY . .
+RUN --mount=type=cache,id=zerosheet-pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile
+RUN pnpm build
+RUN pnpm --filter @zerosheet/api deploy --prod --legacy /output/api
+RUN node infra/scripts/prepare-deployed-workspace-packages.mjs /output/api
+
+# This is deliberately a plain-Node smoke check. It catches TypeScript source
+# exports or missing workspace artifacts that tsx/Vitest can mask in a checkout.
+RUN node -e "await import('/output/api/node_modules/@zerosheet/contracts/dist/index.js'); await import('/output/api/dist/app.js')"
+
+FROM node:24.20.0-alpine3.23 AS runtime
+
+ENV NODE_ENV=production
+ENV API_HOST=0.0.0.0
+ENV API_PORT=3001
+WORKDIR /app
+
+# The official Node image already defines an unprivileged `node` account.
+# Ownership is fixed while copying so the runtime never needs root privileges.
+COPY --from=build --chown=node:node /output/api/ /app/
+USER node
+
+EXPOSE 3001
+HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=4 \
+  CMD node -e "const r=await fetch('http://127.0.0.1:3001/health'); if(!r.ok) process.exit(1)"
+
+CMD ["node", "dist/server.js"]

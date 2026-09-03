@@ -1,0 +1,51 @@
+{
+	# An email lets the ACME certificate authority contact the operator about
+	# expiry or policy problems. Caddy stores certificates in its named volume,
+	# not in the image or repository.
+	email {$ZEROSHEET_ACME_EMAIL}
+	admin off
+}
+
+{$ZEROSHEET_DOMAIN} {
+	encode zstd gzip
+
+	# Browser requests remain same-origin. `handle_path` strips only the public
+	# `/api` routing prefix before forwarding to Fastify, matching Vite in local
+	# development and preserving host-only Secure session cookies.
+	handle_path /api/* {
+		reverse_proxy policy-namespace:3001
+	}
+
+	# Hashed Vite assets can be cached for a year; index.html must be revalidated
+	# so a security release is not hidden behind an old application shell.
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	header /index.html Cache-Control "no-cache"
+
+	# The CSP allows the bundled application plus the exact Google APIs used by
+	# delegated storage. Inline script and eval remain forbidden. Univer creates
+	# runtime style attributes, so style-src needs the narrowly documented
+	# unsafe-inline exception until nonce support is introduced.
+	header {
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; connect-src 'self' https://www.googleapis.com https://sheets.googleapis.com; font-src 'self' data:; form-action 'self' https://{$ZEROSHEET_IDENTITY_DOMAIN}; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+		Permissions-Policy "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+	}
+
+	root * /srv
+	try_files {path} /index.html
+	file_server
+}
+
+{$ZEROSHEET_IDENTITY_DOMAIN} {
+	# The master admin console and Admin REST API are not public product
+	# surfaces. Operators use the container-local kcadm command over SSH when a
+	# realm change is required; OIDC and broker endpoints remain available.
+	@admin path /admin /admin/*
+	respond @admin 404
+
+	reverse_proxy keycloak:8080
+}

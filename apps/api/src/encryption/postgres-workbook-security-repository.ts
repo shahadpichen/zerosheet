@@ -382,6 +382,62 @@ export class PostgresWorkbookSecurityRepository implements WorkbookSecurityRepos
     };
   }
 
+  /**
+   * Return the exact active Drive permissions ZeroSheet knows about. Missing
+   * permission/envelope records are intentionally absent here and counted by
+   * the aggregate worker; the browser compares these IDs with Google's live
+   * list without sending that provider list back to the API.
+   */
+  public async listSharingAuditExpectation(workbookId: string) {
+    const workbook = await this.pool.query<{ google_spreadsheet_id: string }>(
+      `
+        SELECT google_spreadsheet_id
+        FROM workbook_encryption
+        WHERE workbook_id = $1
+      `,
+      [workbookId],
+    );
+    const googleSpreadsheetId = workbook.rows[0]?.google_spreadsheet_id;
+    if (!googleSpreadsheetId) throw new ProductNotFoundError();
+
+    const permissions = await this.pool.query<{
+      user_id: string;
+      email: string;
+      role: "editor" | "viewer";
+      permission_id: string;
+    }>(
+      `
+        SELECT share.user_id,
+               product_user.primary_email AS email,
+               share.role,
+               permission.permission_id
+        FROM workbook_user_shares AS share
+        INNER JOIN product_users AS product_user
+          ON product_user.id = share.user_id
+        INNER JOIN workbook_google_permissions AS permission
+          ON permission.workbook_id = share.workbook_id
+         AND permission.user_id = share.user_id
+         AND permission.revoked_at IS NULL
+        WHERE share.workbook_id = $1
+          AND share.authorization_state = 'active'
+        ORDER BY share.user_id
+        LIMIT 10000
+      `,
+      [workbookId],
+    );
+
+    return {
+      workbookId,
+      googleSpreadsheetId,
+      expectedPermissions: permissions.rows.map((permission) => ({
+        userId: permission.user_id,
+        email: permission.email,
+        role: permission.role,
+        googlePermissionId: permission.permission_id,
+      })),
+    };
+  }
+
   public async createRotationPlan(
     workbookId: string,
     revokedUserId: string,

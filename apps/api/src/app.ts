@@ -64,6 +64,18 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   const app: FastifyInstance = Fastify(serverOptions);
 
   /**
+   * SCIM advertises an externally reachable resource base. Preserve the same
+   * optional `/api` reverse-proxy prefix as the OIDC and Google callbacks;
+   * constructing this URL from the callback path would otherwise jump back to
+   * the origin root in a production same-origin deployment.
+   */
+  const externalApiPath = options.config.apiUrl.pathname.replace(/\/+$/u, "");
+  const scimBaseUrl = new URL(
+    `${externalApiPath}/scim/v2/`,
+    options.config.apiUrl.origin,
+  );
+
+  /**
    * SCIM clients use `application/scim+json`, not generic application/json.
    * Reusing Fastify's hardened default JSON parser preserves its prototype-
    * poisoning checks and body-size enforcement while making the standards-
@@ -140,7 +152,7 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
       authentication: options.authService,
       lifecycle: options.lifecycleService,
       cookies: options.config.authCookies,
-      scimBaseUrl: new URL("/scim/v2/", options.config.oidc.callbackUrl),
+      scimBaseUrl,
     });
     done();
   });

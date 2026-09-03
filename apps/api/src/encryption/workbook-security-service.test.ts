@@ -188,6 +188,21 @@ class FakeRepository implements WorkbookSecurityRepository {
   public findWorkbookAccess() {
     return Promise.resolve(this.access);
   }
+  public listSharingAuditExpectation() {
+    this.calls.push("sharing-audit-expectation");
+    return Promise.resolve({
+      workbookId,
+      googleSpreadsheetId: "1Spreadsheet_Resource_Id_123",
+      expectedPermissions: [
+        {
+          userId: recipientId,
+          email: "recipient@example.com",
+          role: "viewer" as const,
+          googlePermissionId: "1Permission_Resource_Id_123",
+        },
+      ],
+    });
+  }
   public createRotationPlan(): Promise<WorkbookRotationPlanResponse> {
     throw new Error("not used");
   }
@@ -277,6 +292,28 @@ describe("WorkbookSecurityService", () => {
     await expect(
       service.workbookAccess(actor, workbookId),
     ).rejects.toBeInstanceOf(WorkbookEnvelopeUnavailableError);
+  });
+
+  it("reveals expected provider permissions only after manage-sharing authorization", async () => {
+    const { service, repository, decisions } = setup();
+
+    await expect(
+      service.sharingAuditExpectation(actor, workbookId),
+    ).resolves.toMatchObject({
+      expectedPermissions: [
+        { googlePermissionId: "1Permission_Resource_Id_123" },
+      ],
+    });
+    expect(decisions.checks.at(-1)).toMatchObject({
+      workbookId,
+      permission: "can_manage_sharing",
+    });
+    expect(repository.calls).toContain("sharing-audit-expectation");
+
+    decisions.allowed = false;
+    await expect(
+      service.sharingAuditExpectation(actor, workbookId),
+    ).rejects.toBeInstanceOf(ProductForbiddenError);
   });
 
   it("advances the cryptographic version before relationship revocation", async () => {
