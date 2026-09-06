@@ -102,7 +102,7 @@ pnpm dev
 pnpm infra:oidc:verify
 ```
 
-Open `http://127.0.0.1:5173`, choose **Continue to Keycloak**, and sign in with
+Open `http://localhost:5173`, choose **Continue to Keycloak**, and sign in with
 the local learner account. Its first password is temporary, so Keycloak asks the
 user to replace it before returning to ZeroSheet.
 

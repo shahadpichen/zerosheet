@@ -141,10 +141,24 @@ export class PostgresAuthRepository implements AuthRepository {
        * same external identity. Without it, two callbacks could both observe no
        * mapping, create two product users, and race on the unique constraint.
        * The lock key is derived inside PostgreSQL and is released at COMMIT.
+       *
+       * PostgreSQL `text` cannot contain a zero byte. Do not join issuer and
+       * subject with `\u0000`, even though that separator is common in in-memory
+       * code: the database rejects the parameter before hashing it. A JSON
+       * array preserves the two string boundaries without introducing a byte
+       * that PostgreSQL cannot encode, so pairs such as (`ab`, `c`) and (`a`,
+       * `bc`) cannot accidentally acquire the same pre-hash representation.
        */
       await client.query(
-        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-        [`${input.issuer}\u0000${input.subject}`],
+        `
+          SELECT pg_advisory_xact_lock(
+            hashtextextended(
+              jsonb_build_array($1::text, $2::text)::text,
+              0
+            )
+          )
+        `,
+        [input.issuer, input.subject],
       );
 
       const existing = await this.findIdentityUser(

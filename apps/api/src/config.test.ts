@@ -8,8 +8,8 @@ import { loadRuntimeConfig } from "./config.js";
 function validEnvironment(): NodeJS.ProcessEnv {
   return {
     NODE_ENV: "development",
-    ZEROSHEET_API_URL: "http://127.0.0.1:3001",
-    ZEROSHEET_WEB_URL: "http://127.0.0.1:5173",
+    ZEROSHEET_API_URL: "http://localhost:3001",
+    ZEROSHEET_WEB_URL: "http://localhost:5173",
     ZEROSHEET_OIDC_ISSUER_URL: "http://localhost:8080/realms/zerosheet",
     ZEROSHEET_DB_NAME: "zerosheet",
     ZEROSHEET_DB_USER: "zerosheet_app",
@@ -29,7 +29,7 @@ describe("loadRuntimeConfig", () => {
     const config = loadRuntimeConfig(validEnvironment());
 
     expect(config.oidc.callbackUrl.href).toBe(
-      "http://127.0.0.1:3001/auth/callback",
+      "http://localhost:3001/auth/callback",
     );
     expect(config.oidc.allowInsecureHttp).toBe(true);
     expect(config.authCookies).toEqual({
@@ -40,7 +40,7 @@ describe("loadRuntimeConfig", () => {
     });
     expect(config.googleStorage).toEqual({
       enabled: false,
-      callbackUrl: new URL("http://127.0.0.1:3001/google/storage/callback"),
+      callbackUrl: new URL("http://localhost:3001/google/storage/callback"),
       transactionSeconds: 600,
     });
     expect(config.authorization).toMatchObject({

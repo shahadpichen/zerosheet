@@ -169,7 +169,7 @@ describe("AuthService", () => {
     await service.beginLogin();
 
     const completed = await service.completeLogin(
-      new URL("http://127.0.0.1:3001/auth/callback?code=code&state=oidc-state"),
+      new URL("http://localhost:3001/auth/callback?code=code&state=oidc-state"),
       "raw-transaction-token",
     );
 
@@ -199,7 +199,7 @@ describe("AuthService", () => {
 
     await expect(
       service.completeLogin(
-        new URL("http://127.0.0.1:3001/auth/callback?code=code"),
+        new URL("http://localhost:3001/auth/callback?code=code"),
         undefined,
       ),
     ).rejects.toBeInstanceOf(AuthenticationFlowError);

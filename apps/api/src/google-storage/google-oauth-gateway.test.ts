@@ -4,7 +4,7 @@ import { GoogleWebServerOAuthGateway } from "./google-oauth-gateway.js";
 
 const config: Extract<GoogleStorageOAuthConfig, { enabled: true }> = {
   enabled: true,
-  callbackUrl: new URL("http://127.0.0.1:3001/google/storage/callback"),
+  callbackUrl: new URL("http://localhost:3001/google/storage/callback"),
   transactionSeconds: 600,
   clientId: "google-storage-client.apps.googleusercontent.com",
   clientSecret: "server-only-client-secret",

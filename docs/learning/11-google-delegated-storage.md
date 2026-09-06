@@ -130,7 +130,7 @@ Interactive Google testing requires manual project-owner configuration:
 5. Add this exact local authorized redirect URI:
 
    ```text
-   http://127.0.0.1:3001/google/storage/callback
+   http://localhost:3001/google/storage/callback
    ```
 
 6. Put its client ID and secret in the ignored `.env`, generate a random

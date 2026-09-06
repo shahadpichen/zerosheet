@@ -75,7 +75,7 @@ pnpm test
 pnpm dev
 ```
 
-The API listens on `http://127.0.0.1:3001` and the web application on `http://127.0.0.1:5173` by default.
+The API listens on `http://localhost:3001` and the web application on `http://localhost:5173` by default.
 
 With the API and web app running, `pnpm infra:oidc:verify` checks the live
 PostgreSQL, Keycloak, PKCE, cookie, and redirect boundaries without printing

@@ -137,7 +137,7 @@ can create and consent to an OAuth client:
    pnpm infra:federation:google:verify
    ```
 
-7. Run `pnpm dev`, open `http://127.0.0.1:5173`, and choose **Continue with
+7. Run `pnpm dev`, open `http://localhost:5173`, and choose **Continue with
    Google**.
 
 Google permits loopback HTTP redirect URIs for local development. Production

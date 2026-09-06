@@ -457,8 +457,8 @@ function testConfig(): RuntimeConfig {
     logLevel: "silent",
     // This is the externally advertised API base. Fastify injection still
     // addresses internal paths because Caddy/Vite owns prefix stripping.
-    apiUrl: new URL("http://127.0.0.1:3001"),
-    webUrl: new URL("http://127.0.0.1:5173"),
+    apiUrl: new URL("http://localhost:3001"),
+    webUrl: new URL("http://localhost:5173"),
     database: {
       host: "127.0.0.1",
       port: 5434,
@@ -472,8 +472,8 @@ function testConfig(): RuntimeConfig {
       allowInsecureHttp: true,
       clientId: "zerosheet-bff",
       clientSecret: "test-only-secret",
-      callbackUrl: new URL("http://127.0.0.1:3001/auth/callback"),
-      postLogoutRedirectUrl: new URL("http://127.0.0.1:5173/"),
+      callbackUrl: new URL("http://localhost:3001/auth/callback"),
+      postLogoutRedirectUrl: new URL("http://localhost:5173/"),
     },
     authorization: {
       apiUrl: new URL("http://127.0.0.1:8082"),
@@ -489,7 +489,7 @@ function testConfig(): RuntimeConfig {
     },
     googleStorage: {
       enabled: false,
-      callbackUrl: new URL("http://127.0.0.1:3001/google/storage/callback"),
+      callbackUrl: new URL("http://localhost:3001/google/storage/callback"),
       transactionSeconds: 600,
     },
     authLifetimes: {
@@ -605,7 +605,7 @@ describe("ZeroSheet HTTP authentication boundary", () => {
     });
 
     expect(response.statusCode).toBe(303);
-    expect(response.headers.location).toBe("http://127.0.0.1:5173/");
+    expect(response.headers.location).toBe("http://localhost:5173/");
     expect(response.headers["set-cookie"]).toEqual(
       expect.arrayContaining([
         expect.stringContaining("zerosheet_oidc_transaction=;"),
@@ -1063,13 +1063,13 @@ describe("ZeroSheet delegated Google storage boundary", () => {
     });
 
     expect(response.statusCode).toBe(303);
-    expect(response.headers.location).toBe("http://127.0.0.1:5173/");
+    expect(response.headers.location).toBe("http://localhost:5173/");
     expect(response.headers["set-cookie"]).toContain(
       "zerosheet_google_storage_transaction=;",
     );
     expect(setup.googleStorageService.completedInput?.userId).toBe(testUser.id);
     expect(setup.googleStorageService.completedInput?.callbackUrl.href).toBe(
-      "http://127.0.0.1:3001/google/storage/callback?code=provider-code&state=provider-state",
+      "http://localhost:3001/google/storage/callback?code=provider-code&state=provider-state",
     );
     expect(setup.googleStorageService.completedInput?.transactionToken).toBe(
       "google-storage-transaction-token",
@@ -1093,7 +1093,7 @@ describe("ZeroSheet delegated Google storage boundary", () => {
     const accepted = await setup.app.inject({
       method: "POST",
       url: "/google/storage/access-token",
-      headers: { origin: "http://127.0.0.1:5173" },
+      headers: { origin: "http://localhost:5173" },
       cookies: { zerosheet_session: "opaque-browser-session" },
       payload: { forceRefresh: true },
     });
@@ -1118,7 +1118,7 @@ describe("ZeroSheet delegated Google storage boundary", () => {
     const response = await setup.app.inject({
       method: "POST",
       url: "/google/storage/disconnect",
-      headers: { origin: "http://127.0.0.1:5173" },
+      headers: { origin: "http://localhost:5173" },
       cookies: { zerosheet_session: "opaque-browser-session" },
     });
 

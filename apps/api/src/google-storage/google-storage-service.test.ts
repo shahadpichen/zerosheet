@@ -155,7 +155,7 @@ async function completeConnection(
     userId,
     transactionToken: started.transactionToken,
     callbackUrl: new URL(
-      `http://127.0.0.1:3001/google/storage/callback?code=google-code&state=${encodeURIComponent(state)}`,
+      `http://localhost:3001/google/storage/callback?code=google-code&state=${encodeURIComponent(state)}`,
     ),
   });
 }
@@ -209,7 +209,7 @@ describe("GoogleStorageService", () => {
         userId,
         transactionToken: started.transactionToken,
         callbackUrl: new URL(
-          `http://127.0.0.1:3001/google/storage/callback?code=google-code&state=${state}`,
+          `http://localhost:3001/google/storage/callback?code=google-code&state=${state}`,
         ),
       }),
     ).rejects.toMatchObject({ name: "GoogleStorageOAuthFlowError" });

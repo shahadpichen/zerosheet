@@ -12,7 +12,7 @@ set -euo pipefail
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 compose_file="${repository_root}/infra/compose.yaml"
 environment_file="${repository_root}/.env"
-api_base_url="${ZEROSHEET_API_URL:-http://127.0.0.1:3001}"
+api_base_url="${ZEROSHEET_API_URL:-http://localhost:3001}"
 verification_directory="$(mktemp -d)"
 
 # The target is a concrete directory created immediately above. Cleaning it on

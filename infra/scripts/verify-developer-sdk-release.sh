@@ -30,10 +30,13 @@ pnpm typecheck
 pnpm test
 pnpm build
 
-# Real PostgreSQL verifies migrations 006/007, sharing persistence, the
-# aggregate SECURITY DEFINER audit function, and a clean drift result.
+# Real PostgreSQL verifies the OIDC identity upsert, migrations 006/007,
+# sharing persistence, the aggregate SECURITY DEFINER audit function, and a
+# clean drift result. The auth repository belongs here because its advisory
+# lock encoding cannot be faithfully exercised by an in-memory unit double.
 pnpm infra:db:migrate
 ZEROSHEET_RUN_DB_INTEGRATION=true pnpm --filter @zerosheet/api exec vitest run \
+  src/auth/postgres-auth-repository.integration.test.ts \
   src/encryption/postgres-workbook-security-repository.integration.test.ts
 node --env-file=.env apps/worker/dist/sharing-drift-audit.js
 
