@@ -21,7 +21,18 @@ import {
   type EditorCell,
   type GridRange,
 } from "@zerosheet/sheet-core";
+import {
+  AlertTriangle,
+  Columns3,
+  Eraser,
+  LockKeyhole,
+  RefreshCw,
+  ShieldCheck,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Badge } from "./components/ui/badge.js";
+import { Button } from "./components/ui/button.js";
+import { Card, CardContent, CardHeader } from "./components/ui/card.js";
 
 import "@univerjs/preset-sheets-core/lib/index.css";
 import "@univerjs/preset-sheets-filter/lib/index.css";
@@ -272,78 +283,102 @@ export function EncryptedSheetEditor() {
   }
 
   return (
-    <section className="editor-card" aria-labelledby="editor-heading">
-      <div className="editor-heading-row">
-        <div>
-          <p className="eyebrow">Local encrypted sheet technical spike</p>
-          <h2 id="editor-heading">Select exactly what Google cannot read.</h2>
+    <Card className="mt-8" aria-labelledby="editor-heading">
+      <CardHeader className="gap-6 border-b lg:flex-row lg:items-end lg:justify-between lg:space-y-0">
+        <div className="max-w-3xl">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            Local encrypted sheet technical preview
+          </p>
+          <h2
+            id="editor-heading"
+            className="text-2xl font-medium tracking-tight sm:text-3xl"
+          >
+            Select exactly what Google cannot read.
+          </h2>
+          <p className="mt-3 text-sm font-light leading-6 text-muted-foreground">
+            Editing, formulas, sorting, filtering, and search run in this
+            browser. After a short pause, ZeroSheet prepares one
+            Google-compatible batch and verifies every protected value locally.
+          </p>
         </div>
-        <span className="protection-count">
+        <Badge variant="accent" className="w-fit gap-2 px-3 py-2">
+          <ShieldCheck className="h-4 w-4" />
           {protectedCells.toLocaleString()} protected cells
-        </span>
-      </div>
+        </Badge>
+      </CardHeader>
 
-      <div className="editor-actions" aria-label="Cell protection controls">
-        <button
-          className="primary-action"
-          type="button"
-          onClick={() => changeProtection("selection")}
+      <CardContent className="p-4 sm:p-6">
+        <div
+          className="mb-5 flex flex-wrap gap-2"
+          aria-label="Cell protection controls"
         >
-          Protect selection
-        </button>
-        <button
-          className="secondary-action"
-          type="button"
-          onClick={() => changeProtection("columns")}
+          <Button type="button" onClick={() => changeProtection("selection")}>
+            <LockKeyhole />
+            Protect selection
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => changeProtection("columns")}
+          >
+            <Columns3 />
+            Protect selected columns
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => changeProtection("remove")}
+          >
+            <Eraser />
+            Remove protection
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => queuePreviewRef.current?.()}
+          >
+            <RefreshCw />
+            Prepare batch now
+          </Button>
+        </div>
+
+        {/* Univer remains a light editing canvas in both shell themes because
+            this release of its theme package provides no supported dark sheet
+            palette. The surrounding shadcn shell still switches completely. */}
+        <div className="univer-container" ref={containerRef} />
+
+        <div
+          className="mt-4 flex items-start gap-2 text-xs leading-5 text-muted-foreground"
+          aria-live="polite"
         >
-          Protect selected columns
-        </button>
-        <button
-          className="secondary-action"
-          type="button"
-          onClick={() => changeProtection("remove")}
-        >
-          Remove protection
-        </button>
-        <button
-          className="secondary-action"
-          type="button"
-          onClick={() => queuePreviewRef.current?.()}
-        >
-          Prepare batch now
-        </button>
-      </div>
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            {(batch.status === "starting" || batch.status === "ready") &&
+              "Preparing the in-memory workbook key…"}
+            {batch.status === "preparing" &&
+              "Encrypting and verifying the current 100 × 26 batch…"}
+            {batch.status === "prepared" && (
+              <>
+                Verified batch: {batch.encryptedCells.toLocaleString()}{" "}
+                encrypted · {batch.unprotectedCells.toLocaleString()} visible to
+                Google · {batch.bytes.toLocaleString()} bytes
+              </>
+            )}
+            {batch.status === "error" && batch.message}
+          </span>
+        </div>
 
-      <p className="editor-explanation">
-        Editing, formulas, sort, filter, and search run in this browser. Changes
-        are debounced for 750 ms, converted into one Google-compatible batch,
-        encrypted where selected, and decrypted again locally for verification.
-      </p>
-
-      <div className="univer-container" ref={containerRef} />
-
-      <div className="batch-status" aria-live="polite">
-        {(batch.status === "starting" || batch.status === "ready") &&
-          "Preparing the in-memory workbook key…"}
-        {batch.status === "preparing" &&
-          "Encrypting and verifying the current 100 × 26 batch…"}
-        {batch.status === "prepared" && (
-          <>
-            Verified batch: {batch.encryptedCells.toLocaleString()} encrypted ·{" "}
-            {batch.unprotectedCells.toLocaleString()} visible to Google ·{" "}
-            {batch.bytes.toLocaleString()} bytes
-          </>
-        )}
-        {batch.status === "error" && batch.message}
-      </div>
-
-      <p className="technical-warning">
-        This sample remains local because it is not tied to a product workbook.
-        Real workbook creation stores the creator’s HPKE envelope before its
-        first Google write, so ZeroSheet never uploads ciphertext whose only
-        workbook key disappears on reload.
-      </p>
-    </section>
+        <div className="mt-5 flex items-start gap-3 border-2 border-accent-border bg-accent px-4 py-3 text-xs leading-5 text-accent-foreground">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>
+            This sample remains local because it is not tied to a product
+            workbook. Real creation stores the creator’s HPKE envelope before
+            the first Google write, so ZeroSheet never uploads ciphertext whose
+            only workbook key disappears on reload.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

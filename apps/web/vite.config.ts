@@ -1,8 +1,17 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    // shadcn's generator writes `@/…` imports. Defining the same alias in Vite
+    // and tsconfig keeps generated components executable and type-safe without
+    // a second path-resolution plugin.
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
   server: {
     // Use the same host name as Fastify's public callback URL. A login begins
     // through this development proxy, so changing only one side to an IP

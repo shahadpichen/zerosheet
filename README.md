@@ -88,6 +88,10 @@ to create a development Google OAuth client and enable interactive Google login.
 The OpenFGA model and all authorization concepts are explained in
 [`docs/learning/04-openfga-authorization-foundation.md`](docs/learning/04-openfga-authorization-foundation.md).
 
+The shared ZeroDrive-inspired shadcn component language, semantic light/dark
+theme, and documented Univer canvas exception are explained in
+[`docs/architecture/ui-design-system.md`](docs/architecture/ui-design-system.md).
+
 The transactional outbox, product APIs, joiner/mover/leaver rules, and sharing
 lifecycle are explained in
 [`docs/learning/05-product-authorization-lifecycle.md`](docs/learning/05-product-authorization-lifecycle.md).

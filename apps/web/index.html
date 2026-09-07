@@ -3,11 +3,31 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="theme-color"
+      content="#fffcf4"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#141210"
+      media="(prefers-color-scheme: dark)"
+    />
+    <!-- ZeroSheet intentionally shares ZeroDrive's Fira Code typography. The
+         connection hints reduce font-loading latency; self-hosting the files is
+         the production option if the privacy policy forbids font CDN requests. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300..700&display=swap"
+      rel="stylesheet"
+    />
     <meta
       name="description"
-      content="ZeroSheet enterprise IAM learning environment"
+      content="End-to-end encrypted spreadsheets with enterprise identity and access management"
     />
-    <title>ZeroSheet</title>
+    <title>ZeroSheet — Private spreadsheets on Google</title>
   </head>
   <body>
     <div id="root"></div>
