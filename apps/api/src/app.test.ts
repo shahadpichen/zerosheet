@@ -659,13 +659,20 @@ describe("ZeroSheet HTTP authentication boundary", () => {
     expect(response.json()).toEqual({ authenticated: true, user: testUser });
   });
 
-  it("deletes the local session before redirecting through Keycloak logout", async () => {
+  it("accepts a browser form, deletes the session, and redirects through Keycloak logout", async () => {
     const { app, service } = makeApp();
     apps.push(app);
 
     const response = await app.inject({
       method: "POST",
       url: "/auth/logout",
+      /**
+       * A native `<form method="post">` sends this media type even when it
+       * contains no controls. Including the real browser boundary in the test
+       * prevents Fastify from returning 415 before the logout handler runs.
+       */
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: "",
       cookies: { zerosheet_session: "opaque-browser-session" },
     });
 

@@ -1,5 +1,6 @@
 import { HealthResponseSchema } from "@zerosheet/contracts";
 import cookie from "@fastify/cookie";
+import formbody from "@fastify/formbody";
 import Fastify, {
   type FastifyInstance,
   type FastifyServerOptions,
@@ -86,6 +87,16 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
     { parseAs: "string" },
     app.getDefaultJsonParser("ignore", "ignore"),
   );
+
+  /**
+   * Native HTML forms submit POST bodies as
+   * `application/x-www-form-urlencoded`, even when the form has no fields.
+   * The account menu deliberately uses a real form for logout so it still
+   * works without client-side JavaScript and so the browser follows the 303
+   * through Keycloak. Fastify does not parse this media type by default, so
+   * its official plugin must be registered before the authentication routes.
+   */
+  void app.register(formbody);
 
   // Cookie parsing must run before authentication handlers read request.cookies.
   void app.register(cookie);
