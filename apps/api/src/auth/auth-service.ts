@@ -6,7 +6,6 @@ import type {
   AuthApplicationService,
   AuthRepository,
   CompletedLogin,
-  IdentityProviderHint,
   OidcGateway,
   StartedLogin,
 } from "./types.js";
@@ -49,16 +48,13 @@ export class AuthService implements AuthApplicationService {
     this.userId = options.userId ?? randomUUID;
   }
 
-  public async beginLogin(
-    identityProviderHint?: IdentityProviderHint,
-  ): Promise<StartedLogin> {
+  public async beginLogin(): Promise<StartedLogin> {
     const now = this.now();
     const transactionToken = this.opaqueToken();
 
-    // The hint changes only Keycloak's first screen. PKCE, state, nonce, the
-    // callback, and the ZeroSheet session lifecycle remain exactly the same.
-    const request =
-      await this.oidc.createAuthorizationRequest(identityProviderHint);
+    // Google receives only the standard OIDC request. PKCE, state, nonce, the
+    // callback, and the ZeroSheet session lifecycle remain owned by this BFF.
+    const request = await this.oidc.createAuthorizationRequest();
 
     await this.repository.saveLoginTransaction({
       selectorHash: hashOpaqueToken(transactionToken),
@@ -152,9 +148,5 @@ export class AuthService implements AuthApplicationService {
     if (sessionToken) {
       await this.repository.deleteSession(hashOpaqueToken(sessionToken));
     }
-  }
-
-  public logoutUrl(): URL {
-    return this.oidc.createLogoutUrl();
   }
 }

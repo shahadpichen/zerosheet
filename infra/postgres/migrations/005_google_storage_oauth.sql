@@ -1,7 +1,7 @@
 -- ZeroSheet delegated Google storage authorization
 -- =================================================
 --
--- Keycloak's Google connection authenticates a human. These separate records
+-- Google's OIDC connection authenticates a human. These separate records
 -- authorize Drive and Sheets operations after an already authenticated product
 -- user explicitly consents. Google refresh tokens are encrypted by the API
 -- before insertion; the database never stores a directly usable bearer token.

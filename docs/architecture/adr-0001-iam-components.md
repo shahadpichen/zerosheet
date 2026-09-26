@@ -1,9 +1,11 @@
 # ADR 0001: Separate authentication and authorization components
 
-- Status: Accepted
+- Status: Superseded by ADR 0008
 - Date: 2026-09-01
 
 ## Decision
+
+> Historical decision: retained to explain the original learning architecture.
 
 Use Keycloak as ZeroSheet's OIDC identity provider and identity broker, OpenFGA
 for durable relationships, OPA for contextual policy, SPIRE as the SPIFFE

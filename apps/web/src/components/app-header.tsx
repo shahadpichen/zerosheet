@@ -23,7 +23,7 @@ function initials(user: AuthenticatedUser): string {
 /**
  * ZeroDrive's sparse top navigation becomes the shared ZeroSheet application
  * chrome. Authentication data is restricted to the safe product projection;
- * this component never receives a Keycloak token or browser session value.
+ * this component never receives a Google token or browser session value.
  */
 export function AppHeader({
   user,
@@ -81,14 +81,13 @@ export function AppHeader({
                   </span>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                {/* A normal POST form lets the browser follow Keycloak's
-                    redirect and end both product and SSO sessions. Fetching
-                    here would follow that navigation invisibly in JavaScript. */}
+                {/* A normal POST form clears the server-side ZeroSheet session
+                    without exposing the opaque cookie to JavaScript. */}
                 <form action="/api/auth/logout" method="post">
                   <DropdownMenuItem asChild>
                     <button type="submit" className="w-full">
                       <LogOut />
-                      Sign out everywhere
+                      Sign out
                     </button>
                   </DropdownMenuItem>
                 </form>

@@ -7,8 +7,7 @@ guide is [Milestone 14](../../docs/learning/14-developer-sdk-production-release.
 ## Files
 
 - `compose.yaml`: only Caddy publishes 80/443; all credentials are file mounts.
-- `Caddyfile`: same-origin `/api`, separate identity hostname, TLS, CSP, HSTS,
-  bounded static caching, and a blocked public Keycloak admin surface.
+- `Caddyfile`: same-origin `/api`, TLS, CSP, HSTS, and bounded static caching.
 - `environment.example`: names/non-secret IDs only; copy outside the checkout.
 
 Do not run this topology with the example domains, OpenFGA IDs, or Google
@@ -23,5 +22,5 @@ service running under its own non-root UID. Do not loosen the directory mode.
 
 The deployment is deliberately labeled **single-node alpha**. Its conservative
 limits can fit an idle learning stack near a 2 GB VPS boundary, but it has no
-host, database, or identity-service redundancy. Upgrade resources and topology
+host or database redundancy. Upgrade resources and topology
 before promising availability or adding sustained traffic.

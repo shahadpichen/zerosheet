@@ -15,7 +15,7 @@ laboratory.
 ## Trust boundary
 
 OpenFGA stores relationships and returns decisions. It does not authenticate
-users, read Keycloak sessions, query workbook ciphertext, or possess encryption
+users, read browser sessions, query workbook ciphertext, or possess encryption
 keys. The ZeroSheet API is the PEP that maps its authenticated product-user UUID
 to an OpenFGA principal and enforces the result.
 

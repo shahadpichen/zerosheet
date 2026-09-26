@@ -33,19 +33,19 @@ identifiers/verification material, not secrets.
 - reviewed `@zerosheet/crypto`, pinned Capsule, and pinned HPKE code;
 - the pinned Apache-2.0 Univer editor build and the reviewed ZeroSheet adapter
   that translates between editor values and the encrypted storage format;
-- Keycloak for human authentication, not decryption;
+- Google OIDC for human authentication, not decryption;
 - OpenFGA and OPA for authorization decisions, not key possession;
 - SPIRE for workload identity, not workbook access; and
 - the deployment pipeline that builds and serves the reviewed frontend.
 
-Trust is purpose-limited. For example, Keycloak may assert who signed in, but it
+Trust is purpose-limited. For example, Google may assert who signed in, but it
 cannot grant itself a workbook decryption key. SPIRE may authenticate the
 worker, but that SVID is not an HPKE recipient key.
 
 ## Adversaries considered
 
-1. A database administrator or database dump thief who can read/modify product,
-   Keycloak, or authorization state.
+1. A database administrator or database dump thief who can read/modify product
+   or authorization state.
 2. A Google storage/API operator or attacker who obtains Sheet ciphertext and
    structural metadata.
 3. A network attacker between browser, ZeroSheet, Google, or internal services.
@@ -263,7 +263,7 @@ global content key across every workbook.
    fingerprint changes.
 6. Preserve old private-key versions while any retained workbook envelope may
    target them.
-7. Separate dev/staging/production identity issuers, SPIFFE trust domains,
-   OAuth clients, databases, and encryption test data.
+7. Separate dev/staging/production Google OAuth clients, SPIFFE trust domains,
+   databases, and encryption test data.
 8. Test backup restoration, key-loss UX, tampering, rollback controls, and
    revocation behavior before claiming production readiness.

@@ -53,7 +53,7 @@ type StorageState =
 
 /**
  * The browser asks only whether its opaque session is valid. It never reads a
- * Keycloak token and cannot inspect the HttpOnly session cookie. The visual
+ * Google token and cannot inspect the HttpOnly session cookie. The visual
  * redesign therefore changes presentation only; the BFF remains the sole
  * authority that turns a cookie into a safe product-user projection.
  */
@@ -174,9 +174,9 @@ export function App(): React.JSX.Element {
 }
 
 /**
- * Public onboarding exposes only Google federation. Development can retain a
- * local Keycloak test user for IAM exercises, but customer UI must not suggest
- * that ZeroSheet operates a second password-account system.
+ * Public onboarding exposes only direct Google OIDC. The API retains a
+ * compatibility `/auth/login` alias for older bookmarks, but customer UI
+ * intentionally presents one supported sign-in choice.
  */
 function AnonymousHome(): React.JSX.Element {
   const guarantees = [
@@ -193,7 +193,7 @@ function AnonymousHome(): React.JSX.Element {
     {
       icon: ShieldCheck,
       title: "Enterprise access",
-      copy: "Keycloak, OpenFGA, and policy checks decide who may open a workbook.",
+      copy: "Google identifies you; OpenFGA roles and policy checks decide workbook access.",
     },
   ] as const;
 
@@ -237,8 +237,8 @@ function AnonymousHome(): React.JSX.Element {
               </div>
               <CardTitle className="text-xl">Open your workspace</CardTitle>
               <CardDescription>
-                Google proves your identity to Keycloak. ZeroSheet never sees
-                your Google password.
+                Google proves your identity directly to the ZeroSheet BFF.
+                ZeroSheet never sees your Google password.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -262,8 +262,8 @@ function AnonymousHome(): React.JSX.Element {
             <CardFooter className="flex-col items-stretch gap-3">
               <Separator />
               <p className="text-xs font-light leading-5 text-muted-foreground">
-                Your 12-word recovery phrase is never sent to Google, Keycloak,
-                or the ZeroSheet API.
+                Your 12-word recovery phrase is never sent to Google or the
+                ZeroSheet API.
               </p>
             </CardFooter>
           </Card>
@@ -329,7 +329,7 @@ function AuthenticatedWorkspace({
         </p>
         <p>
           <strong className="block text-foreground">Control boundary</strong>
-          Keycloak identity plus OpenFGA and OPA authorization decisions.
+          Google identity plus OpenFGA and OPA authorization decisions.
         </p>
         <p>
           <strong className="block text-foreground">Storage boundary</strong>

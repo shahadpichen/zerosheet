@@ -35,7 +35,7 @@ export interface GoogleStorageServiceOptions {
 
 /**
  * Coordinates a second OAuth relationship after human authentication. Google
- * can authorize a different account than the Keycloak login account; that is
+ * can authorize a different account than the Google sign-in account; that is
  * an explicit storage choice, not an identity-linking operation.
  */
 export class GoogleStorageService implements GoogleStorageApplicationService {

@@ -2,8 +2,9 @@
 # ===================================
 #
 # This file is an auditable RackNerd/VPS starting point, not an HA claim. Only
-# Caddy publishes host ports. PostgreSQL, Keycloak, OpenFGA, OPA, and the API
-# communicate through private Docker networks and use persistent named volumes.
+# Caddy publishes host ports. PostgreSQL, OpenFGA, OPA, and the API communicate
+# through private Docker networks and use persistent named volumes. Human OIDC
+# authentication goes directly from the API to Google's HTTPS endpoints.
 # API/OpenFGA/OPA deliberately share a pod-like network namespace so their HTTP
 # policy calls bind only to loopback; a multi-node deployment must replace that
 # optimization with SPIFFE-authenticated TLS.
@@ -28,9 +29,6 @@ services:
       ZEROSHEET_DB_PASSWORD_FILE: /run/secrets/zerosheet_db_password
       ZEROSHEET_AUDIT_DB_USER: ${ZEROSHEET_AUDIT_DB_USER:-zerosheet_auditor}
       ZEROSHEET_AUDIT_DB_PASSWORD_FILE: /run/secrets/zerosheet_audit_db_password
-      KEYCLOAK_DB_NAME: ${KEYCLOAK_DB_NAME:-keycloak}
-      KEYCLOAK_DB_USER: ${KEYCLOAK_DB_USER:-keycloak_app}
-      KEYCLOAK_DB_PASSWORD_FILE: /run/secrets/keycloak_db_password
       OPENFGA_DB_NAME: ${OPENFGA_DB_NAME:-openfga}
       OPENFGA_DB_USER: ${OPENFGA_DB_USER:-openfga_app}
       OPENFGA_DB_PASSWORD_FILE: /run/secrets/openfga_db_password
@@ -38,7 +36,6 @@ services:
       - postgres_admin_password
       - zerosheet_db_password
       - zerosheet_audit_db_password
-      - keycloak_db_password
       - openfga_db_password
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -78,57 +75,6 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     networks: [data]
-
-  keycloak:
-    build:
-      context: ../..
-      dockerfile: infra/docker/Dockerfile.keycloak
-    environment:
-      KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://postgres:5432/${KEYCLOAK_DB_NAME:-keycloak}
-      KC_DB_USERNAME: ${KEYCLOAK_DB_USER:-keycloak_app}
-      KC_DB_PASSWORD_FILE: /run/secrets/keycloak_db_password
-      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:?KEYCLOAK_ADMIN_USERNAME is required}
-      KC_BOOTSTRAP_ADMIN_PASSWORD_FILE: /run/secrets/keycloak_admin_password
-      KC_HTTP_ENABLED: "true"
-      KC_HOSTNAME: https://${ZEROSHEET_IDENTITY_DOMAIN:?ZEROSHEET_IDENTITY_DOMAIN is required}
-      KC_PROXY_HEADERS: xforwarded
-      KC_PROXY_TRUSTED_ADDRESSES: 172.29.0.0/24
-      KC_HEALTH_ENABLED: "true"
-      KC_METRICS_ENABLED: "true"
-      JAVA_OPTS_KC_HEAP: -XX:InitialRAMPercentage=20 -XX:MaxRAMPercentage=60
-      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-zerosheet}
-      KEYCLOAK_BFF_CLIENT_ID: ${KEYCLOAK_BFF_CLIENT_ID:-zerosheet-bff}
-      KEYCLOAK_BFF_CLIENT_SECRET_FILE: /run/secrets/keycloak_bff_client_secret
-      ZEROSHEET_API_URL: https://${ZEROSHEET_DOMAIN:?ZEROSHEET_DOMAIN is required}/api
-      ZEROSHEET_WEB_URL: https://${ZEROSHEET_DOMAIN:?ZEROSHEET_DOMAIN is required}
-      GOOGLE_OIDC_CLIENT_ID: ${GOOGLE_OIDC_CLIENT_ID:?GOOGLE_OIDC_CLIENT_ID is required}
-      GOOGLE_OIDC_CLIENT_SECRET_FILE: /run/secrets/google_oidc_client_secret
-      GOOGLE_OIDC_HOSTED_DOMAIN: ${GOOGLE_OIDC_HOSTED_DOMAIN:-}
-    secrets:
-      - keycloak_db_password
-      - keycloak_admin_password
-      - keycloak_bff_client_secret
-      - google_oidc_client_secret
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          { printf 'HEAD /health/ready HTTP/1.0\r\n\r\n' >&0;
-          grep 'HTTP/1.0 200'; } 0<>/dev/tcp/localhost/9000
-      interval: 15s
-      timeout: 5s
-      retries: 20
-      start_period: 45s
-    restart: unless-stopped
-    stop_grace_period: 30s
-    mem_limit: ${KEYCLOAK_MEMORY_LIMIT:-640m}
-    security_opt: ["no-new-privileges:true"]
-    logging: *bounded-logging
-    networks: [data, services, egress]
 
   # Docker has no first-class pod object, so this inert container owns the
   # shared network namespace used by the API and both policy engines.
@@ -225,7 +171,6 @@ services:
       LOG_LEVEL: ${ZEROSHEET_LOG_LEVEL:-info}
       ZEROSHEET_API_URL: https://${ZEROSHEET_DOMAIN:?ZEROSHEET_DOMAIN is required}/api
       ZEROSHEET_WEB_URL: https://${ZEROSHEET_DOMAIN:?ZEROSHEET_DOMAIN is required}
-      ZEROSHEET_OIDC_ISSUER_URL: https://${ZEROSHEET_IDENTITY_DOMAIN:?ZEROSHEET_IDENTITY_DOMAIN is required}/realms/${KEYCLOAK_REALM:-zerosheet}
       ZEROSHEET_COOKIE_SECURE: "true"
       ZEROSHEET_DB_HOST: postgres
       POSTGRES_HOST_PORT: "5432"
@@ -233,8 +178,11 @@ services:
       ZEROSHEET_DB_USER: ${ZEROSHEET_DB_USER:-zerosheet_app}
       ZEROSHEET_DB_PASSWORD_FILE: /run/secrets/zerosheet_db_password
       ZEROSHEET_DB_TLS: "false"
-      KEYCLOAK_BFF_CLIENT_ID: ${KEYCLOAK_BFF_CLIENT_ID:-zerosheet-bff}
-      KEYCLOAK_BFF_CLIENT_SECRET_FILE: /run/secrets/keycloak_bff_client_secret
+      # The server-side BFF, never browser JavaScript, exchanges Google's code.
+      # Identity scopes remain separate from the Drive/Sheets OAuth client.
+      GOOGLE_OIDC_CLIENT_ID: ${GOOGLE_OIDC_CLIENT_ID:?GOOGLE_OIDC_CLIENT_ID is required}
+      GOOGLE_OIDC_CLIENT_SECRET_FILE: /run/secrets/google_oidc_client_secret
+      GOOGLE_OIDC_HOSTED_DOMAIN: ${GOOGLE_OIDC_HOSTED_DOMAIN:-}
       OPENFGA_API_URL: http://127.0.0.1:8080
       OPENFGA_STORE_ID: ${OPENFGA_STORE_ID:?Run the OpenFGA bootstrap and set OPENFGA_STORE_ID}
       OPENFGA_AUTHORIZATION_MODEL_ID: ${OPENFGA_AUTHORIZATION_MODEL_ID:?Run the OpenFGA bootstrap and set OPENFGA_AUTHORIZATION_MODEL_ID}
@@ -246,7 +194,7 @@ services:
       GOOGLE_STORAGE_TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/google_storage_token_key
     secrets:
       - zerosheet_db_password
-      - keycloak_bff_client_secret
+      - google_oidc_client_secret
       - openfga_preshared_key
       - google_storage_client_secret
       - google_storage_token_key
@@ -255,8 +203,6 @@ services:
         condition: service_started
       zerosheet-migrate:
         condition: service_completed_successfully
-      keycloak:
-        condition: service_healthy
     read_only: true
     tmpfs: ["/tmp:size=32m,mode=1777"]
     restart: unless-stopped
@@ -322,7 +268,6 @@ services:
       dockerfile: infra/docker/Dockerfile.web
     environment:
       ZEROSHEET_DOMAIN: ${ZEROSHEET_DOMAIN:?ZEROSHEET_DOMAIN is required}
-      ZEROSHEET_IDENTITY_DOMAIN: ${ZEROSHEET_IDENTITY_DOMAIN:?ZEROSHEET_IDENTITY_DOMAIN is required}
       ZEROSHEET_ACME_EMAIL: ${ZEROSHEET_ACME_EMAIL:?ZEROSHEET_ACME_EMAIL is required}
     ports:
       - "80:80"
@@ -333,8 +278,6 @@ services:
       - caddy_config:/config
     depends_on:
       policy-namespace:
-        condition: service_started
-      keycloak:
         condition: service_started
     # Static assets live in the image and Caddy's mutable certificate/config
     # state has dedicated volumes. Making the remaining root filesystem
@@ -348,11 +291,7 @@ services:
     cap_add: [NET_BIND_SERVICE]
     security_opt: ["no-new-privileges:true"]
     logging: *bounded-logging
-    networks:
-      services:
-        aliases:
-          - ${ZEROSHEET_IDENTITY_DOMAIN:?ZEROSHEET_IDENTITY_DOMAIN is required}
-      public: {}
+    networks: [services, public]
 
 secrets:
   postgres_admin_password:
@@ -361,16 +300,10 @@ secrets:
     file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/zerosheet_db_password
   zerosheet_audit_db_password:
     file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/zerosheet_audit_db_password
-  keycloak_db_password:
-    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/keycloak_db_password
   openfga_db_password:
     file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/openfga_db_password
   openfga_datastore_uri:
     file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/openfga_datastore_uri
-  keycloak_admin_password:
-    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/keycloak_admin_password
-  keycloak_bff_client_secret:
-    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/keycloak_bff_client_secret
   openfga_preshared_key:
     file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/openfga_preshared_key
   google_oidc_client_secret:
@@ -386,11 +319,8 @@ volumes:
   caddy_config:
 
 networks:
-  # The explicit subnet gives Keycloak a narrow trusted reverse-proxy range.
   services:
     internal: true
-    ipam:
-      config: [{ subnet: 172.29.0.0/24 }]
   data:
     internal: true
   egress: {}

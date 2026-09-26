@@ -6,7 +6,7 @@
 ## Decision
 
 Use a second Google OAuth web-server client for Drive and Sheets authorization.
-It is separate from the Google identity provider configured in Keycloak. Ask
+It is separate from the Google OIDC client used for sign-in. Ask
 only for `drive.file` and `drive.appdata`, use authorization code flow with
 PKCE, and require the already authenticated ZeroSheet product session throughout
 the callback.

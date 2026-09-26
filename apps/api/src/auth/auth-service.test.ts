@@ -5,7 +5,6 @@ import { hashOpaqueToken } from "./opaque-tokens.js";
 import type {
   AuthRepository,
   CreateSessionInput,
-  IdentityProviderHint,
   OidcGateway,
   SaveLoginTransactionInput,
   StoredLoginTransaction,
@@ -81,15 +80,10 @@ class RecordingRepository implements AuthRepository {
 
 class RecordingOidcGateway implements OidcGateway {
   public exchangedTransaction: StoredLoginTransaction | undefined;
-  public identityProviderHint: IdentityProviderHint | undefined;
 
-  public createAuthorizationRequest(
-    identityProviderHint?: IdentityProviderHint,
-  ) {
-    this.identityProviderHint = identityProviderHint;
-
+  public createAuthorizationRequest() {
     return Promise.resolve({
-      authorizationUrl: new URL("http://keycloak.local/authorize"),
+      authorizationUrl: new URL("https://accounts.google.com/o/oauth2/v2/auth"),
       state: "oidc-state",
       nonce: "oidc-nonce",
       codeVerifier: "pkce-verifier",
@@ -102,16 +96,12 @@ class RecordingOidcGateway implements OidcGateway {
   ) {
     this.exchangedTransaction = transaction;
     return Promise.resolve({
-      issuer: "http://keycloak.local/realms/zerosheet",
-      subject: "keycloak-subject",
+      issuer: "https://accounts.google.com",
+      subject: "google-subject",
       email: user.email,
       emailVerified: true,
       displayName: user.displayName,
     });
-  }
-
-  public createLogoutUrl(): URL {
-    return new URL("http://keycloak.local/logout");
   }
 }
 
@@ -151,19 +141,6 @@ describe("AuthService", () => {
     );
   });
 
-  it("forwards the reviewed Google alias without changing the login transaction", async () => {
-    const { service, repository, oidc } = serviceFixture();
-
-    await service.beginLogin("google");
-
-    expect(oidc.identityProviderHint).toBe("google");
-    expect(repository.savedTransaction).toMatchObject({
-      state: "oidc-state",
-      nonce: "oidc-nonce",
-      codeVerifier: "pkce-verifier",
-    });
-  });
-
   it("consumes PKCE state and creates a separately hashed product session", async () => {
     const { service, repository, oidc } = serviceFixture();
     await service.beginLogin();
@@ -179,8 +156,8 @@ describe("AuthService", () => {
     expect(repository.consumedState).toBe("oidc-state");
     expect(oidc.exchangedTransaction).toEqual(repository.transaction);
     expect(repository.identity).toMatchObject({
-      issuer: "http://keycloak.local/realms/zerosheet",
-      subject: "keycloak-subject",
+      issuer: "https://accounts.google.com",
+      subject: "google-subject",
       candidateUserId: user.id,
     });
     expect(repository.session).toMatchObject({

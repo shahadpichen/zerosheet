@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Create encrypted logical backups of the three service-isolated databases.
+# Create encrypted logical backups of the two service-isolated databases.
 #
 # pg_dump runs inside the private PostgreSQL container and reads the mounted
 # administrator file there. Plaintext custom-format dumps live only in a
@@ -65,7 +65,6 @@ dump_database() {
 }
 
 dump_database product ZEROSHEET_DB_NAME
-dump_database identity KEYCLOAK_DB_NAME
 dump_database authorization OPENFGA_DB_NAME
 
 (

@@ -3,7 +3,7 @@
 # Restore encrypted dumps into a disposable, networkless PostgreSQL container.
 #
 # This is intentionally not a production restore command. A random container
-# with no port/network and no mounted application volume receives three fresh
+# with no port/network and no mounted application volume receives two fresh
 # databases. The drill checks archive integrity and the product schema marker,
 # then removes only that random container and mktemp directory. Live ZeroSheet
 # containers, volumes, and databases are never targeted.
@@ -20,7 +20,7 @@ if [[ ! -r "$backup_directory/SHA256SUMS" ]]; then
   echo "Missing encrypted-backup checksum manifest." >&2
   exit 1
 fi
-for logical_name in product identity authorization; do
+for logical_name in product authorization; do
   if [[ ! -r "$backup_directory/$logical_name.dump.age" ]]; then
     echo "Missing encrypted $logical_name dump." >&2
     exit 1
@@ -54,7 +54,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-for logical_name in product identity authorization; do
+for logical_name in product authorization; do
   age --decrypt \
     --identity "$age_identity_file" \
     --output "$temporary_directory/$logical_name.dump" \
@@ -77,7 +77,7 @@ for _attempt in {1..30}; do
 done
 docker exec "$container_name" pg_isready --username postgres >/dev/null
 
-for logical_name in product identity authorization; do
+for logical_name in product authorization; do
   database_name="${logical_name}_restore_drill"
   docker exec "$container_name" createdb --username postgres "$database_name"
   docker cp "$temporary_directory/$logical_name.dump" "$container_name:/tmp/$logical_name.dump" >/dev/null
@@ -96,4 +96,4 @@ if [[ "$schema_version" != "007_security_drift_auditor" ]]; then
   exit 1
 fi
 
-echo "Isolated restore drill passed for product, identity, and authorization databases."
+echo "Isolated restore drill passed for product and authorization databases."

@@ -38,7 +38,7 @@ The responsibilities remain separate:
 
 | Concern                  | Protocol or component    | ZeroSheet result                                              |
 | ------------------------ | ------------------------ | ------------------------------------------------------------- |
-| Interactive sign-in      | OIDC through Keycloak    | An opaque browser session identifies a product user.          |
+| Interactive sign-in      | Direct Google OIDC       | An opaque browser session identifies a product user.          |
 | Enterprise provisioning  | SCIM 2.0 subset          | A directory-managed user and tenant lifecycle status exist.   |
 | Durable relationships    | OpenFGA                  | Organization, team, and workbook relationships are evaluated. |
 | Current lifecycle policy | PostgreSQL PIP plus OPA  | A suspended tenant membership overrides relationship allows.  |
@@ -139,7 +139,7 @@ anything. One subsystem being ahead of the other never becomes permission.
 
 ## Account linking is deliberately strict
 
-A SCIM `userName` is directory data, not proof that an existing Keycloak/OIDC
+A SCIM `userName` is directory data, not proof that an existing Google/OIDC
 identity is the same human. Milestone 7 creates a directory-managed product
 user and does not silently attach it to an existing `(issuer, subject)` merely
 because email strings match.
@@ -191,7 +191,8 @@ security destination with retention and access controls.
 - Existing `organization_members` and `relationship_outbox` tables remain the
   source of product relationship mutation intent.
 
-Keycloak still owns authentication identities in its separate database.
+Google still owns authentication accounts; ZeroSheet stores only the external
+OIDC mapping and opaque product sessions.
 OpenFGA still owns the applied relationship graph in its separate database.
 SCIM does not move those responsibilities into the ZeroSheet product schema.
 

@@ -4,12 +4,11 @@ ZeroSheet separates authentication, authorization, product data, and encryption-
 
 ```text
 Browser
-  -> Google / optional upstream authentication
-  -> Keycloak broker / sole ZeroSheet OIDC issuer
+  -> Google / sole human OIDC issuer
   -> opaque HttpOnly ZeroSheet session
   -> Google Drive and Sheets APIs / short-lived delegated storage access
   -> ZeroSheet API / BFF / PEP
-      -> Keycloak / authentication
+      -> Google OIDC endpoints / code exchange and signing keys
       -> OpenFGA / relationship authorization
       -> OPA / contextual authorization
       -> PostgreSQL / product and session state
@@ -25,12 +24,14 @@ Browser
 4. Google Drive permission, ZeroSheet permission, and possession of a decryption-key envelope are separate controls.
 5. Passwords, OAuth tokens, private keys, recovery phrases, and plaintext protected cells must never enter logs.
 6. Missing or unavailable authorization data results in denial.
-7. Keycloak tokens and OIDC client secrets remain behind the BFF boundary; browser JavaScript receives only a narrow product-user projection.
+7. Google tokens and the OIDC client secret remain behind the BFF boundary;
+   browser JavaScript receives only a narrow product-user projection.
 8. External identities are keyed by the OIDC `(issuer, subject)` pair. Email alone never links accounts.
 9. Upstream Google login and Google Drive API authorization are separate grants;
    sign-in does not grant storage access.
-10. A Keycloak provider hint selects a reviewed login route but never bypasses
-    first-login, account-linking, token validation, or product authorization.
+10. The Google route is fixed; no request parameter chooses an identity issuer.
+    State, nonce, PKCE, signed-claim validation, and product authorization all
+    remain mandatory.
 11. Organization administration does not imply workbook plaintext access;
     workbook relationships are explicit and separately enforced.
 12. OpenFGA stores product-user/resource relationships only. An authorization

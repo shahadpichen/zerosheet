@@ -93,7 +93,7 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
    * `application/x-www-form-urlencoded`, even when the form has no fields.
    * The account menu deliberately uses a real form for logout so it still
    * works without client-side JavaScript and so the browser follows the 303
-   * through Keycloak. Fastify does not parse this media type by default, so
+   * back to ZeroSheet. Fastify does not parse this media type by default, so
    * its official plugin must be registered before the authentication routes.
    */
   void app.register(formbody);
@@ -178,9 +178,9 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   });
 
   /**
-   * Delegated Google storage is a separate OAuth surface from Keycloak sign-in.
+   * Delegated Google storage is a separate OAuth surface from Google sign-in.
    * Its plugin owns a different transaction cookie and never receives a
-   * Keycloak token, recovery phrase, workbook key, or cell payload.
+   * identity token, recovery phrase, workbook key, or cell payload.
    */
   void app.register((googleStorageScope, _pluginOptions, done) => {
     registerGoogleStorageRoutes(googleStorageScope, {

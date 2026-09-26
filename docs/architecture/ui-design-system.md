@@ -45,10 +45,9 @@ make cell selection, formula bars, or plugin popovers unreadable.
 
 ## Authentication UX
 
-The public page exposes one action: **Continue with Google**. The local
-Keycloak learner account remains useful for IAM development, but it is not
-advertised as a customer account type. Google login still flows through
-Keycloak and creates the same protected PKCE/state/nonce transaction as before.
+The public page exposes one action: **Continue with Google**. The ZeroSheet BFF
+talks directly to Google's fixed OIDC issuer and creates a protected
+PKCE/state/nonce transaction. No local password-account option exists.
 
 Google Drive access remains a second, clearly labeled action after sign-in.
 This preserves least privilege: proving identity does not silently authorize

@@ -28,7 +28,7 @@ import { WorkbookSecurityService } from "./encryption/workbook-security-service.
 /**
  * This composition root is the only place that chooses concrete adapters.
  * Domain/authentication logic depends on interfaces, while the running process
- * receives PostgreSQL and Keycloak implementations. Keeping construction here
+ * receives PostgreSQL and direct-Google OIDC implementations. Keeping construction here
  * makes trust boundaries visible and prevents routes from opening ad-hoc
  * database connections or discovering arbitrary issuers.
  */

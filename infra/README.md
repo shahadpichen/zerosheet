@@ -4,7 +4,7 @@ Infrastructure is introduced incrementally so each IAM service can be studied in
 
 ## Available profiles
 
-- `auth-lab`: PostgreSQL and Keycloak.
+- `auth-lab`: the PostgreSQL foundation used by direct Google OIDC sessions.
 - `authorization-lab`: PostgreSQL and OpenFGA's migration/server services.
 - `contextual-authorization-lab`: stateless OPA with read-only ZeroSheet Rego
   policy.
@@ -17,7 +17,9 @@ Infrastructure is introduced incrementally so each IAM service can be studied in
 - `workload-mtls-probes`: registered and negative Node clients that verify
   exact peer authorization, mandatory client identity, and TLS-only transport.
 
-PostgreSQL has no profile so Docker Compose can treat it as the shared datastore dependency. Selecting `auth-lab` adds Keycloak and waits for PostgreSQL health before starting it.
+PostgreSQL has no profile so Docker Compose can treat it as the shared
+datastore dependency. Selecting `auth-lab` now starts only PostgreSQL; Google is
+a hosted OIDC dependency and has no local identity-server container.
 
 ## Planned profiles
 
@@ -30,8 +32,8 @@ PostgreSQL has no profile so Docker Compose can treat it as the shared datastore
 `.env` supplies local values to Compose. The single-node alpha stack in
 `production/compose.yaml` uses mounted files inside a root-only secret directory;
 development passwords must never be reused. Its API understands `NAME_FILE`,
-while narrow entrypoints adapt Keycloak/OpenFGA configuration to those files
-without printing their contents.
+while narrow entrypoints adapt OpenFGA configuration to those files without
+printing their contents.
 
 ## Persistence boundary
 
@@ -43,7 +45,9 @@ networkless database; operators must schedule it and move results off-site.
 
 ## ZeroSheet schema migrations
 
-`pnpm infra:db:migrate` applies SQL files from `postgres/migrations` as the restricted `zerosheet_app` role. Using the runtime owner proves an application migration cannot silently modify Keycloak or OpenFGA state.
+`pnpm infra:db:migrate` applies SQL files from `postgres/migrations` as the
+restricted `zerosheet_app` role. Using the runtime owner proves an application
+migration cannot silently modify OpenFGA state.
 
 Migration 002 adds organization, team, workbook, membership, share, and
 relationship-outbox tables. The outbox is ZeroSheet product state; OpenFGA
@@ -60,16 +64,12 @@ Transactions are expiring and one-use; connections store only an AES-256-GCM
 refresh-token envelope and exact granted scopes. The independent encryption key
 stays outside PostgreSQL, and verification never selects credential envelopes.
 
-Milestone 3 keeps the API on the developer host and adds Google as a Keycloak-
-brokered upstream identity provider. `pnpm infra:federation:google:configure`
-creates or updates that provider for an existing realm, while
-`pnpm infra:federation:google:verify` applies it and checks Keycloak's persisted
-security settings.
-
-Google federation is disabled while `.env` contains placeholders. After real
-development credentials are added, set `GOOGLE_IDENTITY_PROVIDER_ENABLED=true`
-and rerun the verifier. With `pnpm dev` running, `pnpm infra:oidc:verify` also
-checks the live API-to-Keycloak redirect and the fixed Google broker hint.
+Milestone 3 now connects the API/BFF directly to Google's fixed OIDC issuer.
+Add a real Google web-client ID and secret to `.env`, register
+`http://localhost:3001/auth/callback`, then use `pnpm infra:auth:verify` for the
+database/discovery foundation. With `pnpm dev` running,
+`pnpm infra:oidc:verify` checks the live Google redirect, PKCE/state/nonce
+transaction, hashed selector, and local-only logout.
 
 Milestone 4 starts both current profiles with `pnpm infra:authorization:up`.
 OpenFGA owns only the `openfga` database. The one-shot migration container must

@@ -4,10 +4,7 @@ import type {
 } from "@zerosheet/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { AuthenticationFlowError } from "./auth/auth-service.js";
-import type {
-  AuthApplicationService,
-  IdentityProviderHint,
-} from "./auth/types.js";
+import type { AuthApplicationService } from "./auth/types.js";
 import { buildApp } from "./app.js";
 import type { RuntimeConfig } from "./config.js";
 import type { AuditApplicationService } from "./audit/types.js";
@@ -47,7 +44,7 @@ const testUser: AuthenticatedUser = {
 };
 
 /**
- * HTTP tests replace Keycloak and PostgreSQL with this deterministic boundary.
+ * HTTP tests replace Google OIDC and PostgreSQL with this deterministic boundary.
  * The AuthService suite tests state transitions separately; these cases focus
  * on redirects, status codes, cookie flags, and public response bodies.
  */
@@ -56,14 +53,11 @@ class FakeAuthService implements AuthApplicationService {
   public failCallback = false;
   public callbackTransactionToken: string | undefined;
   public loggedOutToken: string | undefined;
-  public identityProviderHint: IdentityProviderHint | undefined;
 
-  public beginLogin(identityProviderHint?: IdentityProviderHint) {
-    this.identityProviderHint = identityProviderHint;
-
+  public beginLogin() {
     return Promise.resolve({
       authorizationUrl: new URL(
-        "http://localhost:8080/realms/zerosheet/protocol/openid-connect/auth?state=provider-state",
+        "https://accounts.google.com/o/oauth2/v2/auth?state=provider-state",
       ),
       transactionToken: "browser-transaction-token",
     });
@@ -92,12 +86,6 @@ class FakeAuthService implements AuthApplicationService {
   public logout(sessionToken: string | undefined): Promise<void> {
     this.loggedOutToken = sessionToken;
     return Promise.resolve();
-  }
-
-  public logoutUrl(): URL {
-    return new URL(
-      "http://localhost:8080/realms/zerosheet/protocol/openid-connect/logout?client_id=zerosheet-bff",
-    );
   }
 }
 
@@ -468,12 +456,11 @@ function testConfig(): RuntimeConfig {
       useTls: false,
     },
     oidc: {
-      issuerUrl: new URL("http://localhost:8080/realms/zerosheet"),
-      allowInsecureHttp: true,
-      clientId: "zerosheet-bff",
+      issuerUrl: new URL("https://accounts.google.com"),
+      clientId: "login-client.apps.googleusercontent.com",
       clientSecret: "test-only-secret",
       callbackUrl: new URL("http://localhost:3001/auth/callback"),
-      postLogoutRedirectUrl: new URL("http://localhost:5173/"),
+      hostedDomain: undefined,
     },
     authorization: {
       apiUrl: new URL("http://127.0.0.1:8082"),
@@ -557,14 +544,14 @@ describe("ZeroSheet HTTP authentication boundary", () => {
   });
 
   it("starts login with a protected, short-lived transaction cookie", async () => {
-    const { app, service } = makeApp();
+    const { app } = makeApp();
     apps.push(app);
 
     const response = await app.inject({ method: "GET", url: "/auth/login" });
 
     expect(response.statusCode).toBe(302);
     expect(response.headers.location).toContain(
-      "/protocol/openid-connect/auth",
+      "https://accounts.google.com/o/oauth2/v2/auth",
     );
     expect(response.headers["set-cookie"]).toContain(
       "zerosheet_oidc_transaction=browser-transaction-token",
@@ -573,11 +560,10 @@ describe("ZeroSheet HTTP authentication boundary", () => {
     expect(response.headers["set-cookie"]).toContain("SameSite=Lax");
     expect(response.headers["set-cookie"]).toContain("Max-Age=600");
     expect(response.headers["cache-control"]).toBe("no-store");
-    expect(service.identityProviderHint).toBeUndefined();
   });
 
-  it("starts the same protected flow with the fixed Google broker hint", async () => {
-    const { app, service } = makeApp();
+  it("keeps the explicit Google route as an alias for the direct OIDC flow", async () => {
+    const { app } = makeApp();
     apps.push(app);
 
     const response = await app.inject({
@@ -586,7 +572,7 @@ describe("ZeroSheet HTTP authentication boundary", () => {
     });
 
     expect(response.statusCode).toBe(302);
-    expect(service.identityProviderHint).toBe("google");
+    expect(response.headers.location).toContain("accounts.google.com");
     expect(response.headers["set-cookie"]).toContain(
       "zerosheet_oidc_transaction=browser-transaction-token",
     );
@@ -659,7 +645,7 @@ describe("ZeroSheet HTTP authentication boundary", () => {
     expect(response.json()).toEqual({ authenticated: true, user: testUser });
   });
 
-  it("accepts a browser form, deletes the session, and redirects through Keycloak logout", async () => {
+  it("accepts a browser form, deletes the session, and returns to ZeroSheet", async () => {
     const { app, service } = makeApp();
     apps.push(app);
 
@@ -677,7 +663,7 @@ describe("ZeroSheet HTTP authentication boundary", () => {
     });
 
     expect(response.statusCode).toBe(303);
-    expect(response.headers.location).toContain("/openid-connect/logout");
+    expect(response.headers.location).toBe("http://localhost:5173/");
     expect(response.headers["set-cookie"]).toContain("zerosheet_session=;");
     expect(service.loggedOutToken).toBe("opaque-browser-session");
   });

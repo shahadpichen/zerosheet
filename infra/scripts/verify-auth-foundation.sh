@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 
-# This script proves the IAM foundation's security properties rather than merely
-# checking that containers have started.
-#
-# A green Docker status cannot prove database isolation, realm discovery, JWKS
-# publication, or correct OIDC client configuration. Each check below validates
-# one of those behaviors and exits immediately when an invariant is broken.
+# This script proves the direct-Google IAM foundation's security properties.
+# A green Docker status cannot prove database isolation or the hosted provider's
+# issuer/JWKS boundary, so each invariant is checked explicitly.
 
 set -Eeuo pipefail
 
@@ -21,8 +18,8 @@ if [[ ! -f "$environment_file" ]]; then
   exit 1
 fi
 
-# Export the documented values so curl checks and Docker Compose use exactly the
-# same realm, ports, client ID, and database accounts.
+# Export the documented values so checks and Compose use the same database
+# accounts and confidential Google client configuration.
 set -a
 # shellcheck disable=SC1090 -- the path is calculated and intentionally local.
 source "$environment_file"
@@ -85,131 +82,47 @@ echo "Verifying PostgreSQL ownership and cross-database isolation..."
 
 assert_database_owner_can_connect "$ZEROSHEET_DB_USER" "$ZEROSHEET_DB_PASSWORD" "$ZEROSHEET_DB_NAME"
 
-assert_database_owner_can_connect "$KEYCLOAK_DB_USER" "$KEYCLOAK_DB_PASSWORD" "$KEYCLOAK_DB_NAME"
-
 assert_database_owner_can_connect "$OPENFGA_DB_USER" "$OPENFGA_DB_PASSWORD" "$OPENFGA_DB_NAME"
 
-assert_cross_database_connection_is_denied "$ZEROSHEET_DB_USER" "$ZEROSHEET_DB_PASSWORD" "$KEYCLOAK_DB_NAME"
-
-assert_cross_database_connection_is_denied "$KEYCLOAK_DB_USER" "$KEYCLOAK_DB_PASSWORD" "$ZEROSHEET_DB_NAME"
+assert_cross_database_connection_is_denied "$ZEROSHEET_DB_USER" "$ZEROSHEET_DB_PASSWORD" "$OPENFGA_DB_NAME"
 
 assert_cross_database_connection_is_denied "$OPENFGA_DB_USER" "$OPENFGA_DB_PASSWORD" "$ZEROSHEET_DB_NAME"
 
-echo "Verifying Keycloak health and OIDC metadata..."
+if [[ "$GOOGLE_OIDC_CLIENT_ID" == replace-with-* ]] ||
+  [[ "$GOOGLE_OIDC_CLIENT_SECRET" == replace-with-* ]]; then
+  echo "Google sign-in still contains placeholder OAuth credentials." >&2
+  exit 1
+fi
 
-curl --fail --silent --show-error "http://127.0.0.1:${KEYCLOAK_MANAGEMENT_PORT}/health/ready" >/dev/null
+echo "Verifying Google's fixed OIDC authority and signing-key metadata..."
+curl --fail --silent --show-error \
+  "https://accounts.google.com/.well-known/openid-configuration" |
+  node --input-type=module --eval '
+    let body = "";
+    for await (const chunk of process.stdin) body += chunk;
+    const discovery = JSON.parse(body);
 
-# Node parses the response instead of relying on grep. This ensures the endpoint
-# returned valid JSON and that its issuer is exactly the value ZeroSheet will
-# validate in Milestone 2.
-curl --fail --silent --show-error "${KEYCLOAK_PUBLIC_URL}/realms/${KEYCLOAK_REALM}/.well-known/openid-configuration" |
-  EXPECTED_ISSUER="${KEYCLOAK_PUBLIC_URL}/realms/${KEYCLOAK_REALM}" node --input-type=module --eval '
-      let body = "";
-      for await (const chunk of process.stdin) body += chunk;
-      const discovery = JSON.parse(body);
+    if (discovery.issuer !== "https://accounts.google.com") {
+      throw new Error("Google discovery returned an unexpected issuer");
+    }
 
-      if (discovery.issuer !== process.env.EXPECTED_ISSUER) {
-        throw new Error(
-          "Unexpected issuer: " +
-            discovery.issuer +
-            "; expected " +
-            process.env.EXPECTED_ISSUER,
-        );
+    for (const field of ["authorization_endpoint", "token_endpoint", "jwks_uri"]) {
+      const value = discovery[field];
+      if (typeof value !== "string" || new URL(value).protocol !== "https:") {
+        throw new Error("Google discovery is missing a secure " + field);
       }
+    }
+  '
 
-      for (const field of ["authorization_endpoint", "token_endpoint", "jwks_uri"]) {
-        if (typeof discovery[field] !== "string" || discovery[field].length === 0) {
-          throw new Error("OIDC discovery is missing " + field);
-        }
-      }
-    '
-
-curl --fail --silent --show-error "${KEYCLOAK_PUBLIC_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs" |
+curl --fail --silent --show-error "https://www.googleapis.com/oauth2/v3/certs" |
   node --input-type=module --eval '
     let body = "";
     for await (const chunk of process.stdin) body += chunk;
     const jwks = JSON.parse(body);
-
     if (!Array.isArray(jwks.keys) || jwks.keys.length === 0) {
-      throw new Error("Keycloak published no signing keys");
+      throw new Error("Google published no OIDC signing keys");
     }
   '
 
-# A valid client with an exact callback and PKCE challenge should render
-# Keycloak's login page with HTTP 200. An unknown client should be rejected with
-# HTTP 400. Checking both responses proves that the success page is tied to the
-# imported BFF client rather than being a generic endpoint response.
-authorization_arguments=(
-  --silent
-  --output /dev/null
-  --write-out "%{http_code}"
-  --get
-  --data-urlencode "redirect_uri=$ZEROSHEET_API_URL/auth/callback"
-  --data-urlencode "response_type=code"
-  --data-urlencode "scope=openid profile email"
-  --data-urlencode "state=verification-state"
-  --data-urlencode "nonce=verification-nonce"
-  --data-urlencode "code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
-  --data-urlencode "code_challenge_method=S256"
-)
-
-authorization_url="$KEYCLOAK_PUBLIC_URL/realms/$KEYCLOAK_REALM/protocol/openid-connect/auth"
-
-authorization_status_for_client() {
-  local client_id="$1"
-
-  curl "${authorization_arguments[@]}" --data-urlencode "client_id=$client_id" "$authorization_url"
-}
-
-valid_client_status="$(authorization_status_for_client "$KEYCLOAK_BFF_CLIENT_ID")"
-invalid_client_status="$(authorization_status_for_client "unknown-client")"
-
-if [[ "$valid_client_status" != "200" ]]; then
-  echo "Expected the configured client to render login with 200; received $valid_client_status." >&2
-  exit 1
-fi
-
-if [[ "$invalid_client_status" != "400" ]]; then
-  echo "Expected an unknown client to be rejected with 400; received $invalid_client_status." >&2
-  exit 1
-fi
-
-# The bootstrap administrator belongs to Keycloak's master realm and is used
-# only to inspect local configuration. This password grant targets Keycloak's
-# built-in admin-cli; it does not enable password grant on zerosheet-bff.
-#
-# The resulting access token is held only in shell memory, never printed, and
-# unset immediately after the supported Admin API confirms the learner account.
-admin_token_response="$(curl --fail --silent --show-error --request POST --data-urlencode "client_id=admin-cli" --data-urlencode "grant_type=password" --data-urlencode "username=$KEYCLOAK_ADMIN_USERNAME" --data-urlencode "password=$KEYCLOAK_ADMIN_PASSWORD" "$KEYCLOAK_PUBLIC_URL/realms/master/protocol/openid-connect/token")"
-
-admin_token="$(printf "%s" "$admin_token_response" | node --input-type=module --eval '
-  let body = "";
-  for await (const chunk of process.stdin) body += chunk;
-  const tokenResponse = JSON.parse(body);
-
-  if (typeof tokenResponse.access_token !== "string") {
-    throw new Error("Keycloak admin token response contained no access token");
-  }
-
-  process.stdout.write(tokenResponse.access_token);
-')"
-
-curl --fail --silent --show-error --get --header "Authorization: Bearer $admin_token" --data-urlencode "username=$KEYCLOAK_TEST_USER_USERNAME" --data-urlencode "exact=true" "$KEYCLOAK_PUBLIC_URL/admin/realms/$KEYCLOAK_REALM/users" |
-  EXPECTED_USERNAME="$KEYCLOAK_TEST_USER_USERNAME" node --input-type=module --eval '
-    let body = "";
-    for await (const chunk of process.stdin) body += chunk;
-    const users = JSON.parse(body);
-
-    if (
-      !Array.isArray(users) ||
-      users.length !== 1 ||
-      users[0]?.username !== process.env.EXPECTED_USERNAME
-    ) {
-      throw new Error("The imported learner account was not found");
-    }
-  '
-
-unset admin_token admin_token_response
-
-echo "PASS: Keycloak is ready, publishes valid OIDC metadata/JWKS, accepts the BFF client, rejects an unknown client, and retains the learner account."
-echo "All authentication-foundation checks passed."
+echo "PASS: Google publishes the fixed HTTPS issuer, protocol endpoints, and signing keys."
+echo "All direct-Google authentication-foundation checks passed."

@@ -6,7 +6,7 @@
 ## Context
 
 The first deployment target is an inexpensive 2 GB KVM VPS. ZeroSheet still
-needs public TLS, Keycloak, two policy engines, three isolated databases, the
+needs public TLS, direct Google OIDC, two policy engines, two isolated databases, the
 API, static web assets, backup/restore evidence, mounted secrets, and bounded
 resource usage. A design sized like a multi-region enterprise platform would
 make learning and early product validation unnecessarily expensive; calling a
@@ -16,12 +16,11 @@ single VPS “production ready” would be equally misleading.
 
 The repository provides a single-node alpha Compose topology:
 
-- Caddy is the only public process and owns automatic HTTPS for separate app
-  and identity hostnames.
+- Caddy is the only public process and owns automatic HTTPS for the app origin.
 - The browser and API share one public origin; Caddy strips `/api`, preserving
   host-only Secure cookies and avoiding credentialed cross-origin requests.
-- PostgreSQL is one process with isolated databases/owners for ZeroSheet,
-  Keycloak, and OpenFGA. A fourth login can execute only an aggregate security
+- PostgreSQL is one process with isolated databases/owners for ZeroSheet and
+  OpenFGA. A third login can execute only an aggregate security
   drift function and has no table `SELECT` grant.
 - API, OpenFGA, and OPA share one pod-like Docker network namespace. Both PDPs
   bind to loopback, so their local HTTP traffic cannot traverse a bridge.
@@ -36,7 +35,7 @@ The repository provides a single-node alpha Compose topology:
 
 - The topology is suitable for a learning deployment and limited alpha, not a
   high-availability SLA. One host, disk, PostgreSQL process, Caddy instance, or
-  Keycloak process is still a single point of failure.
+  Google OIDC dependency is still a single point of interactive-login failure.
 - Memory pressure is visible rather than hidden. Sustained traffic should move
   to at least 4 GB or managed services before adding swap as a blanket fix.
 - The SPIFFE/mTLS lab remains the multi-process/multi-node pattern. If PDPs move
@@ -59,7 +58,7 @@ host port.
 ### Put every service in one process/container
 
 That would erase separate lifecycle, resource, credential, and compromise
-boundaries for Keycloak, policy engines, application code, and PostgreSQL.
+boundaries for policy engines, application code, and PostgreSQL.
 
 ### Advertise the 2 GB node as scalable production
 

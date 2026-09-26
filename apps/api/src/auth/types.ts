@@ -2,9 +2,9 @@ import type { AuthenticatedUser } from "@zerosheet/contracts";
 
 /**
  * The OIDC gateway returns only claims the product needs. Keeping this narrow
- * stops Keycloak-specific token objects from spreading into product code and
- * makes a later Keycloak upgrade an adapter concern rather than an application
- * rewrite.
+ * stops Google-specific token objects from spreading into product code and
+ * keeps a future identity-provider migration inside the adapter rather than
+ * turning it into an application rewrite.
  */
 export interface ExternalIdentityProfile {
   issuer: string;
@@ -26,14 +26,6 @@ export interface StoredLoginTransaction {
   nonce: string;
   codeVerifier: string;
 }
-
-/**
- * These values are Keycloak broker aliases, not arbitrary user input. Keeping
- * the set closed prevents a query string from becoming an unchecked upstream
- * identity-provider selector. Add another value only when its Keycloak
- * provider is intentionally configured and reviewed.
- */
-export type IdentityProviderHint = "google";
 
 export interface SaveLoginTransactionInput extends StoredLoginTransaction {
   selectorHash: string;
@@ -84,14 +76,11 @@ export interface AuthRepository {
  * protocol validation.
  */
 export interface OidcGateway {
-  createAuthorizationRequest(
-    identityProviderHint?: IdentityProviderHint,
-  ): Promise<PendingOidcAuthorization>;
+  createAuthorizationRequest(): Promise<PendingOidcAuthorization>;
   exchangeAuthorizationCode(
     callbackUrl: URL,
     transaction: StoredLoginTransaction,
   ): Promise<ExternalIdentityProfile>;
-  createLogoutUrl(): URL;
 }
 
 export interface StartedLogin {
@@ -110,9 +99,7 @@ export interface CompletedLogin {
  * in one service that can be exercised independently.
  */
 export interface AuthApplicationService {
-  beginLogin(
-    identityProviderHint?: IdentityProviderHint,
-  ): Promise<StartedLogin>;
+  beginLogin(): Promise<StartedLogin>;
   completeLogin(
     callbackUrl: URL,
     transactionToken: string | undefined,
@@ -121,5 +108,4 @@ export interface AuthApplicationService {
     sessionToken: string | undefined,
   ): Promise<AuthenticatedUser | null>;
   logout(sessionToken: string | undefined): Promise<void>;
-  logoutUrl(): URL;
 }

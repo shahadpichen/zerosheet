@@ -3,7 +3,7 @@
 # Generate the internal credentials required by the single-node release stack.
 #
 # The destination must be an explicit absolute directory. Existing files are
-# never overwritten, because silently replacing a PostgreSQL/Keycloak/OpenFGA
+# never overwritten, because silently replacing a PostgreSQL/OpenFGA
 # credential would lock running services out of durable state. Generated values
 # are URL-safe where they become part of the OpenFGA PostgreSQL URI. Google
 # client secrets cannot be generated locally; unmistakable disabled sentinels
@@ -20,11 +20,8 @@ secret_names=(
   postgres_admin_password
   zerosheet_db_password
   zerosheet_audit_db_password
-  keycloak_db_password
   openfga_db_password
   openfga_datastore_uri
-  keycloak_admin_password
-  keycloak_bff_client_secret
   openfga_preshared_key
   google_oidc_client_secret
   google_storage_client_secret
@@ -70,18 +67,14 @@ write_secret() {
 postgres_admin_password="$(random_base64url 48)"
 zerosheet_db_password="$(random_base64url 48)"
 zerosheet_audit_db_password="$(random_base64url 48)"
-keycloak_db_password="$(random_base64url 48)"
 openfga_db_password="$(random_base64url 48)"
 
 write_secret postgres_admin_password "$postgres_admin_password"
 write_secret zerosheet_db_password "$zerosheet_db_password"
 write_secret zerosheet_audit_db_password "$zerosheet_audit_db_password"
-write_secret keycloak_db_password "$keycloak_db_password"
 write_secret openfga_db_password "$openfga_db_password"
 write_secret openfga_datastore_uri \
   "postgres://openfga_app:${openfga_db_password}@postgres:5432/openfga?sslmode=disable"
-write_secret keycloak_admin_password "$(random_base64url 48)"
-write_secret keycloak_bff_client_secret "$(random_base64url 48)"
 write_secret openfga_preshared_key "$(random_base64url 48)"
 write_secret google_storage_token_key "$(random_base64url 32)"
 write_secret google_oidc_client_secret \
@@ -95,7 +88,6 @@ write_secret google_storage_client_secret \
 postgres_admin_password=""
 zerosheet_db_password=""
 zerosheet_audit_db_password=""
-keycloak_db_password=""
 openfga_db_password=""
 
 echo "Created ${#secret_names[@]} secret files in $secret_directory."

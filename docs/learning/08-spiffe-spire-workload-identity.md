@@ -18,10 +18,10 @@ The official specifications and implementation references used here are:
 
 ## Human identity versus workload identity
 
-Keycloak and OIDC establish a human browser principal:
+Google OIDC establishes a human browser principal:
 
 ```text
-human -> Google or local account -> Keycloak -> ZeroSheet session
+human -> Google -> ZeroSheet OIDC callback -> ZeroSheet session
 ```
 
 SPIFFE and SPIRE establish a running software principal:
@@ -71,8 +71,8 @@ control plane must never authenticate to production. Separate regions or
 companies can use separate trust domains and explicitly exchange public bundles
 only when federation is intended.
 
-This federation is not Google identity federation. Keycloak trusting Google
-means accepting upstream human authentication through OIDC. SPIFFE federation
+This federation is not Google OIDC authentication. ZeroSheet trusting Google
+means accepting a human authentication result through OIDC. SPIFFE federation
 means obtaining another workload trust domain's public bundle so a service can
 cryptographically validate that domain's SVIDs.
 

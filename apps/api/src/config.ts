@@ -19,11 +19,15 @@ export interface DatabaseConfig {
 
 export interface OidcConfig {
   issuerUrl: URL;
-  allowInsecureHttp: boolean;
   clientId: string;
   clientSecret: string;
   callbackUrl: URL;
-  postLogoutRedirectUrl: URL;
+  /**
+   * When present, this is both an account-chooser hint and a claim ZeroSheet
+   * requires in the verified Google ID token. An empty value permits consumer
+   * Google accounts as well as Workspace accounts.
+   */
+  hostedDomain: string | undefined;
 }
 
 export interface AuthorizationConfig {
@@ -217,6 +221,34 @@ function urlValue(environment: NodeJS.ProcessEnv, name: string): URL {
   }
 }
 
+function optionalHostedDomain(
+  environment: NodeJS.ProcessEnv,
+): string | undefined {
+  const value = environment.GOOGLE_OIDC_HOSTED_DOMAIN?.trim().toLowerCase();
+
+  if (!value) {
+    return undefined;
+  }
+
+  /**
+   * This is a DNS domain claim, not a URL or arbitrary authorization
+   * expression. Rejecting schemes, paths, ports, whitespace, and wildcards
+   * prevents a configuration typo from looking like tenant enforcement.
+   */
+  if (
+    value.length > 253 ||
+    !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/u.test(
+      value,
+    )
+  ) {
+    throw new Error(
+      "GOOGLE_OIDC_HOSTED_DOMAIN must be an exact DNS domain or empty",
+    );
+  }
+
+  return value;
+}
+
 /**
  * Append a route to a configured public service base while preserving an
  * optional reverse-proxy prefix. For example, `https://example.test/api`
@@ -321,7 +353,6 @@ export function loadRuntimeConfig(
 
   const apiUrl = urlValue(environment, "ZEROSHEET_API_URL");
   const webUrl = urlValue(environment, "ZEROSHEET_WEB_URL");
-  const issuerUrl = urlValue(environment, "ZEROSHEET_OIDC_ISSUER_URL");
   const openFgaApiUrl = urlValue(environment, "OPENFGA_API_URL");
   const opaApiUrl = urlValue(environment, "OPA_API_URL");
   const names = cookieNames(secureCookies);
@@ -351,22 +382,6 @@ export function loadRuntimeConfig(
   if (nodeEnvironment === "production" && apiUrl.origin !== webUrl.origin) {
     throw new Error(
       "ZEROSHEET_API_URL and ZEROSHEET_WEB_URL must use the same origin in production",
-    );
-  }
-
-  /**
-   * OIDC normally requires HTTPS. The only exception is our local learning
-   * server bound to the loopback device; allowing HTTP for a LAN or production
-   * hostname would expose authorization codes and tokens to interception.
-   */
-  const allowInsecureHttp =
-    nodeEnvironment !== "production" &&
-    issuerUrl.protocol === "http:" &&
-    isLoopbackHostname(issuerUrl.hostname);
-
-  if (issuerUrl.protocol !== "https:" && !allowInsecureHttp) {
-    throw new Error(
-      "ZEROSHEET_OIDC_ISSUER_URL must use HTTPS outside the local loopback development environment",
     );
   }
 
@@ -422,16 +437,20 @@ export function loadRuntimeConfig(
       useTls: booleanValue(environment, "ZEROSHEET_DB_TLS", false),
     },
     oidc: {
-      issuerUrl,
-      allowInsecureHttp,
-      clientId: required(environment, "KEYCLOAK_BFF_CLIENT_ID"),
+      /**
+       * Google is now ZeroSheet's only human OIDC issuer. Hard-coding the
+       * official issuer prevents configuration from silently redirecting
+       * authentication to an attacker-controlled discovery document.
+       */
+      issuerUrl: new URL("https://accounts.google.com"),
+      clientId: required(environment, "GOOGLE_OIDC_CLIENT_ID"),
       clientSecret: requiredSecret(
         environment,
-        "KEYCLOAK_BFF_CLIENT_SECRET",
+        "GOOGLE_OIDC_CLIENT_SECRET",
         readSecretFile,
       ),
       callbackUrl: childUrl(apiUrl, "auth/callback"),
-      postLogoutRedirectUrl: new URL("/", webUrl),
+      hostedDomain: optionalHostedDomain(environment),
     },
     authorization: {
       apiUrl: openFgaApiUrl,

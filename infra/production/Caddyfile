@@ -27,7 +27,7 @@
 	# runtime style attributes, so style-src needs the narrowly documented
 	# unsafe-inline exception until nonce support is introduced.
 	header {
-		Content-Security-Policy "default-src 'self'; base-uri 'self'; connect-src 'self' https://www.googleapis.com https://sheets.googleapis.com; font-src 'self' data:; form-action 'self' https://{$ZEROSHEET_IDENTITY_DOMAIN}; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; connect-src 'self' https://www.googleapis.com https://sheets.googleapis.com; font-src 'self' data:; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"
 		Permissions-Policy "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -38,14 +38,4 @@
 	root * /srv
 	try_files {path} /index.html
 	file_server
-}
-
-{$ZEROSHEET_IDENTITY_DOMAIN} {
-	# The master admin console and Admin REST API are not public product
-	# surfaces. Operators use the container-local kcadm command over SSH when a
-	# realm change is required; OIDC and broker endpoints remain available.
-	@admin path /admin /admin/*
-	respond @admin 404
-
-	reverse_proxy keycloak:8080
 }

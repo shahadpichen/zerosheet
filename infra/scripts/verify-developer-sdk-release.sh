@@ -48,7 +48,7 @@ docker compose \
   --profile bootstrap \
   --profile operations \
   config --quiet
-if rg -n '^[[:space:]]+(KC_DB_PASSWORD|KC_BOOTSTRAP_ADMIN_PASSWORD|KEYCLOAK_BFF_CLIENT_SECRET|OPENFGA_AUTHN_PRESHARED_KEYS|ZEROSHEET_DB_PASSWORD):' infra/production/compose.yaml; then
+if rg -n '^[[:space:]]+(GOOGLE_OIDC_CLIENT_SECRET|OPENFGA_AUTHN_PRESHARED_KEYS|ZEROSHEET_DB_PASSWORD):' infra/production/compose.yaml; then
   echo "A direct production secret variable replaced a mounted *_FILE boundary." >&2
   exit 1
 fi
@@ -99,7 +99,6 @@ docker compose \
   build --quiet
 test "$(docker image inspect zerosheet-production-api --format '{{.Config.User}}')" = 'node'
 test "$(docker image inspect zerosheet-production-sharing-drift-audit --format '{{.Config.User}}')" = 'node'
-test "$(docker image inspect zerosheet-production-keycloak --format '{{.Config.User}}')" = '1000'
 test "$(docker image inspect zerosheet-production-openfga --format '{{.Config.User}}')" = '65532:65532'
 test "$(docker image inspect zerosheet-production-caddy --format '{{.Config.User}}')" = 'nobody:nobody'
 docker run --rm --read-only --cap-drop ALL \
@@ -108,7 +107,6 @@ docker run --rm --read-only --cap-drop ALL \
   node -e "const fs=require('node:fs'); if (!fs.readFileSync('/run/secrets/zerosheet_db_password','utf8').trim()) process.exit(1)"
 docker run --rm --read-only --cap-drop ALL --cap-add NET_BIND_SERVICE \
   --env ZEROSHEET_DOMAIN=sheets.example.com \
-  --env ZEROSHEET_IDENTITY_DOMAIN=identity.example.com \
   --env ZEROSHEET_ACME_EMAIL=operator@example.com \
   --entrypoint caddy \
   zerosheet-production-caddy \

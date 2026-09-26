@@ -5,7 +5,7 @@
 # Why not let every service use the PostgreSQL administrator?
 # A vulnerability in one service would then grant access to all authentication,
 # authorization, and encrypted-metadata records. Separate owners ensure that a
-# compromised OpenFGA process, for example, cannot read Keycloak's tables.
+# compromised OpenFGA process, for example, cannot read ZeroSheet's tables.
 #
 # The official PostgreSQL image executes this file only while initializing an
 # empty volume. All later schema changes must use explicit migrations so that a
@@ -59,13 +59,10 @@ load_required_secret() {
 # ordinary database/role names. Password contents never appear in diagnostics.
 : "${ZEROSHEET_DB_NAME:?ZEROSHEET_DB_NAME is required}"
 : "${ZEROSHEET_DB_USER:?ZEROSHEET_DB_USER is required}"
-: "${KEYCLOAK_DB_NAME:?KEYCLOAK_DB_NAME is required}"
-: "${KEYCLOAK_DB_USER:?KEYCLOAK_DB_USER is required}"
 : "${OPENFGA_DB_NAME:?OPENFGA_DB_NAME is required}"
 : "${OPENFGA_DB_USER:?OPENFGA_DB_USER is required}"
 
 load_required_secret ZEROSHEET_DB_PASSWORD
-load_required_secret KEYCLOAK_DB_PASSWORD
 load_required_secret OPENFGA_DB_PASSWORD
 
 # A new production database may create a login for the aggregate-only sharing
@@ -117,8 +114,6 @@ SQL
 }
 
 create_service_database "$ZEROSHEET_DB_NAME" "$ZEROSHEET_DB_USER" "$ZEROSHEET_DB_PASSWORD"
-
-create_service_database "$KEYCLOAK_DB_NAME" "$KEYCLOAK_DB_USER" "$KEYCLOAK_DB_PASSWORD"
 
 create_service_database "$OPENFGA_DB_NAME" "$OPENFGA_DB_USER" "$OPENFGA_DB_PASSWORD"
 

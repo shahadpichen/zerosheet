@@ -4,11 +4,11 @@ ZeroSheet is an end-to-end encrypted spreadsheet product and a hands-on enterpri
 
 The product will combine:
 
-- Keycloak for authentication, federation, and enterprise SSO.
+- Google OIDC for direct human authentication through the ZeroSheet BFF.
 - OpenFGA for relationship-based authorization.
 - OPA for contextual authorization policies.
 - SPIRE for short-lived SPIFFE workload identities.
-- PostgreSQL for product, identity-service, and authorization-service state.
+- PostgreSQL for product, session, and authorization-service state.
 - Google Drive and Sheets for encrypted workbook storage and synchronization.
 
 ## Current milestone
@@ -55,7 +55,7 @@ examples/             Encrypted CRM UI and typed backend integration
 ```bash
 pnpm install
 pnpm infra:auth:up
-pnpm infra:federation:google:verify
+pnpm infra:auth:verify
 pnpm infra:authorization:up
 pnpm infra:authorization:provision
 pnpm infra:db:migrate
@@ -78,12 +78,15 @@ pnpm dev
 The API listens on `http://localhost:3001` and the web application on `http://localhost:5173` by default.
 
 With the API and web app running, `pnpm infra:oidc:verify` checks the live
-PostgreSQL, Keycloak, PKCE, cookie, and redirect boundaries without printing
-credential values.
+PostgreSQL, direct-Google PKCE, cookie, and redirect boundaries without
+printing credential values.
 
-Google federation starts disabled with placeholder credentials. Follow
-[`docs/learning/03-google-identity-federation.md`](docs/learning/03-google-identity-federation.md)
-to create a development Google OAuth client and enable interactive Google login.
+Follow
+[`docs/learning/01-google-oidc-foundation.md`](docs/learning/01-google-oidc-foundation.md)
+and
+[`docs/learning/03-direct-google-authentication.md`](docs/learning/03-direct-google-authentication.md)
+to create the dedicated Google sign-in client, understand the direct BFF flow,
+and keep identity separate from roles and Drive authorization.
 
 The OpenFGA model and all authorization concepts are explained in
 [`docs/learning/04-openfga-authorization-foundation.md`](docs/learning/04-openfga-authorization-foundation.md).

@@ -37,7 +37,7 @@ type GoogleOAuthEndpointConfig = Pick<
 
 /**
  * This adapter talks only to Google's fixed OAuth endpoints. It deliberately
- * does not request identity claims: Keycloak already authenticated the person,
+ * does not request identity claims: Google OIDC already authenticated the person,
  * while this independent grant authorizes Drive and Sheets storage actions.
  */
 export class GoogleWebServerOAuthGateway implements GoogleStorageOAuthGateway {

@@ -125,7 +125,7 @@ absent for the platform-level organization-creation action and defaults to
 active only when no directory management row exists. An explicit suspended row
 denies existing-resource access.
 
-OPA does not receive names, email addresses, Keycloak tokens, session tokens,
+OPA does not receive names, email addresses, Google tokens, session tokens,
 OpenFGA tuples, workbook content, Google tokens, or encryption material.
 
 `create_organization` is special because an organization and its OpenFGA owner

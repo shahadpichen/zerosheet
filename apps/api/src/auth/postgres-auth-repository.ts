@@ -21,7 +21,7 @@ interface LoginTransactionRow {
 }
 
 /**
- * PostgreSQL implements the durable side of the BFF pattern. Keycloak remains
+ * PostgreSQL implements the durable side of the BFF pattern. Google remains
  * the authority for authentication, while these tables connect its stable
  * `(issuer, subject)` identity to a ZeroSheet product user and opaque session.
  */

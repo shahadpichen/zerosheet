@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
 
-# Verify the first real ZeroSheet OIDC/BFF request boundary.
+# Verify the live ZeroSheet direct-Google OIDC/BFF request boundary.
 #
-# Prerequisites are intentionally explicit: PostgreSQL and Keycloak must be up,
-# the API must be running, and `.env` must exist. The script does not automate a
-# user's password entry; instead it proves everything up to Keycloak's login UI
-# and leaves the interactive authentication ceremony to the browser.
+# PostgreSQL and the API must be running. The script stops before interactive
+# Google authentication: it proves the authorization request, PKCE transaction,
+# fail-closed callback, opaque cookie, and local logout behavior without reading
+# a user's Google account or printing an OAuth client secret.
 
 set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 compose_file="${repository_root}/infra/compose.yaml"
 environment_file="${repository_root}/.env"
-api_base_url="${ZEROSHEET_API_URL:-http://localhost:3001}"
 verification_directory="$(mktemp -d)"
 
 # The target is a concrete directory created immediately above. Cleaning it on
@@ -24,6 +23,16 @@ if [[ ! -f "${environment_file}" ]]; then
   echo "Missing ${environment_file}. Copy .env.example to .env first." >&2
   exit 1
 fi
+
+# A caller may point the verifier at a temporary port when another local
+# project owns 3001. Capture that explicit override before sourcing `.env`;
+# every other setting still comes from the repository's normal configuration.
+api_base_url_override="${ZEROSHEET_API_URL:-}"
+set -a
+# shellcheck disable=SC1090 -- this is the repository-local ignored environment.
+source "${environment_file}"
+set +a
+api_base_url="${api_base_url_override:-${ZEROSHEET_API_URL:-http://localhost:3001}}"
 
 "${repository_root}/infra/scripts/migrate-zerosheet-database.sh" >/dev/null
 
@@ -61,7 +70,7 @@ for table in product_users external_identities oidc_login_transactions user_sess
   fi
 done
 
-echo "PASS: product users, external identities, one-time logins, and sessions are migrated."
+echo "PASS: product users, Google identities, one-time logins, and sessions are migrated."
 
 echo "Verifying the live API/BFF boundary..."
 
@@ -110,22 +119,23 @@ login_code="$(
     --dump-header "${verification_directory}/login.headers" \
     --output /dev/null \
     --write-out '%{http_code}' \
-    "${api_base_url}/auth/login"
+    "${api_base_url}/auth/login/google"
 )"
 
 if [[ "${login_code}" != "302" ]]; then
-  echo "FAIL: login did not redirect to Keycloak." >&2
+  echo "FAIL: login did not redirect to Google." >&2
   exit 1
 fi
 
 for expected_header_fragment in \
-  "location: http://localhost:8080/realms/zerosheet/protocol/openid-connect/auth" \
+  "location: https://accounts.google.com/o/oauth2/v2/auth" \
   "response_type=code" \
   "scope=openid+email+profile" \
   "state=" \
   "nonce=" \
   "code_challenge=" \
   "code_challenge_method=S256" \
+  "prompt=select_account" \
   "set-cookie: zerosheet_oidc_transaction=" \
   "HttpOnly" \
   "SameSite=Lax"; do
@@ -135,25 +145,16 @@ for expected_header_fragment in \
   fi
 done
 
-# The Google-specific route must create the same protected transaction while
-# adding only Keycloak's fixed broker hint. This is a shortcut through Keycloak,
-# not a second OAuth implementation inside ZeroSheet.
-google_login_code="$(
-  curl --silent --show-error \
-    --dump-header "${verification_directory}/google-login.headers" \
-    --output /dev/null \
-    --write-out '%{http_code}' \
-    "${api_base_url}/auth/login/google"
-)"
+if grep --quiet 'kc_idp_hint' "${verification_directory}/login.headers"; then
+  echo "FAIL: the direct Google request still contains a Keycloak broker hint." >&2
+  exit 1
+fi
 
-if [[ "${google_login_code}" != "302" ]] ||
-  ! grep --quiet 'kc_idp_hint=google' \
-    "${verification_directory}/google-login.headers" ||
-  ! grep --quiet 'set-cookie: zerosheet_oidc_transaction=' \
-    "${verification_directory}/google-login.headers" ||
-  ! grep --quiet 'HttpOnly' \
-    "${verification_directory}/google-login.headers"; then
-  echo "FAIL: Google login did not use the protected Keycloak broker flow." >&2
+# The request hint improves account selection, but the API independently checks
+# the signed `hd` claim after callback before it creates a product session.
+if [[ -n "${GOOGLE_OIDC_HOSTED_DOMAIN:-}" ]] &&
+  ! grep --quiet "hd=${GOOGLE_OIDC_HOSTED_DOMAIN}" "${verification_directory}/login.headers"; then
+  echo "FAIL: the configured Workspace-domain hint is missing." >&2
   exit 1
 fi
 
@@ -186,6 +187,8 @@ fi
 logout_code="$(
   curl --silent --show-error \
     --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data '' \
     --dump-header "${verification_directory}/logout.headers" \
     --output /dev/null \
     --write-out '%{http_code}' \
@@ -193,20 +196,17 @@ logout_code="$(
 )"
 
 if [[ "${logout_code}" != "303" ]] ||
-  ! grep --quiet \
-    'location: http://localhost:8080/realms/zerosheet/protocol/openid-connect/logout' \
+  ! grep --quiet "location: ${ZEROSHEET_WEB_URL}/" \
     "${verification_directory}/logout.headers" ||
-  ! grep --quiet 'client_id=zerosheet-bff' \
-    "${verification_directory}/logout.headers" ||
-  ! grep --quiet 'post_logout_redirect_uri=' \
+  ! grep --quiet 'set-cookie: zerosheet_session=;' \
     "${verification_directory}/logout.headers"; then
-  echo "FAIL: logout did not clear local state through the registered Keycloak flow." >&2
+  echo "FAIL: logout did not clear local state and return to ZeroSheet." >&2
   exit 1
 fi
 
 echo "PASS: API health and fail-closed anonymous session behavior are correct."
 echo "PASS: an unbound callback is rejected without disclosing which validation failed."
 echo "PASS: login uses Authorization Code, PKCE S256, state, nonce, and an HttpOnly SameSite cookie."
-echo "PASS: Google login adds only the reviewed Keycloak broker hint and retains the protected transaction."
+echo "PASS: the application talks directly to Google's fixed OIDC issuer with no broker hint."
 echo "PASS: PostgreSQL stores the transaction cookie digest rather than relying on browser identity claims."
-echo "PASS: logout redirects through Keycloak with the registered client and destination."
+echo "PASS: browser-form logout clears only the ZeroSheet session and returns to the application."

@@ -10,12 +10,11 @@ function validEnvironment(): NodeJS.ProcessEnv {
     NODE_ENV: "development",
     ZEROSHEET_API_URL: "http://localhost:3001",
     ZEROSHEET_WEB_URL: "http://localhost:5173",
-    ZEROSHEET_OIDC_ISSUER_URL: "http://localhost:8080/realms/zerosheet",
     ZEROSHEET_DB_NAME: "zerosheet",
     ZEROSHEET_DB_USER: "zerosheet_app",
     ZEROSHEET_DB_PASSWORD: "test-only-password",
-    KEYCLOAK_BFF_CLIENT_ID: "zerosheet-bff",
-    KEYCLOAK_BFF_CLIENT_SECRET: "test-only-client-secret",
+    GOOGLE_OIDC_CLIENT_ID: "login-client.apps.googleusercontent.com",
+    GOOGLE_OIDC_CLIENT_SECRET: "test-only-client-secret",
     OPENFGA_API_URL: "http://127.0.0.1:8082",
     OPENFGA_STORE_ID: "01H00000000000000000000000",
     OPENFGA_AUTHORIZATION_MODEL_ID: "01H00000000000000000000001",
@@ -31,7 +30,8 @@ describe("loadRuntimeConfig", () => {
     expect(config.oidc.callbackUrl.href).toBe(
       "http://localhost:3001/auth/callback",
     );
-    expect(config.oidc.allowInsecureHttp).toBe(true);
+    expect(config.oidc.issuerUrl.href).toBe("https://accounts.google.com/");
+    expect(config.oidc.hostedDomain).toBeUndefined();
     expect(config.authCookies).toEqual({
       secure: false,
       loginTransactionName: "zerosheet_oidc_transaction",
@@ -62,8 +62,6 @@ describe("loadRuntimeConfig", () => {
       NODE_ENV: "production",
       ZEROSHEET_API_URL: "https://zerosheet.example/api",
       ZEROSHEET_WEB_URL: "https://zerosheet.example",
-      ZEROSHEET_OIDC_ISSUER_URL:
-        "https://identity.zerosheet.example/realms/zerosheet",
       OPENFGA_API_URL: "https://authorization.zerosheet.example",
       OPA_API_URL: "https://policy.zerosheet.example",
     };
@@ -87,49 +85,38 @@ describe("loadRuntimeConfig", () => {
     ).toThrow(/ZEROSHEET_COOKIE_SECURE/u);
   });
 
-  it("refuses a non-loopback HTTP issuer even during development", () => {
-    expect(() =>
-      loadRuntimeConfig({
-        ...validEnvironment(),
-        ZEROSHEET_OIDC_ISSUER_URL: "http://identity.internal/realms/zerosheet",
-      }),
-    ).toThrow(/must use HTTPS/u);
-  });
-
   it("refuses HTTP product URLs in production", () => {
     expect(() =>
       loadRuntimeConfig({
         ...validEnvironment(),
         NODE_ENV: "production",
         ZEROSHEET_COOKIE_SECURE: "true",
-        ZEROSHEET_OIDC_ISSUER_URL:
-          "https://identity.zerosheet.example/realms/zerosheet",
       }),
     ).toThrow(/must use HTTPS/u);
   });
 
   it("fails fast when the confidential client secret is missing", () => {
     const environment = validEnvironment();
-    delete environment.KEYCLOAK_BFF_CLIENT_SECRET;
+    delete environment.GOOGLE_OIDC_CLIENT_SECRET;
 
     expect(() => loadRuntimeConfig(environment)).toThrow(
-      /KEYCLOAK_BFF_CLIENT_SECRET/u,
+      /GOOGLE_OIDC_CLIENT_SECRET/u,
     );
   });
 
   it("loads sensitive values from absolute mounted files", () => {
     const environment = validEnvironment();
     delete environment.ZEROSHEET_DB_PASSWORD;
-    delete environment.KEYCLOAK_BFF_CLIENT_SECRET;
+    delete environment.GOOGLE_OIDC_CLIENT_SECRET;
     delete environment.OPENFGA_PRESHARED_KEY;
     environment.ZEROSHEET_DB_PASSWORD_FILE = "/run/secrets/database_password";
-    environment.KEYCLOAK_BFF_CLIENT_SECRET_FILE =
-      "/run/secrets/bff_client_secret";
+    environment.GOOGLE_OIDC_CLIENT_SECRET_FILE =
+      "/run/secrets/google_login_client_secret";
     environment.OPENFGA_PRESHARED_KEY_FILE = "/run/secrets/openfga_key";
 
     const values = new Map([
       ["/run/secrets/database_password", "database-value\n"],
-      ["/run/secrets/bff_client_secret", "client-value\n"],
+      ["/run/secrets/google_login_client_secret", "client-value\n"],
       ["/run/secrets/openfga_key", "authorization-value\n"],
     ]);
     const config = loadRuntimeConfig(environment, (path) => {
@@ -147,21 +134,23 @@ describe("loadRuntimeConfig", () => {
     expect(() =>
       loadRuntimeConfig({
         ...validEnvironment(),
-        KEYCLOAK_BFF_CLIENT_SECRET_FILE: "/run/secrets/bff_client_secret",
+        GOOGLE_OIDC_CLIENT_SECRET_FILE:
+          "/run/secrets/google_login_client_secret",
       }),
     ).toThrow(/cannot both be set/u);
 
     const relative = validEnvironment();
-    delete relative.KEYCLOAK_BFF_CLIENT_SECRET;
-    relative.KEYCLOAK_BFF_CLIENT_SECRET_FILE = "secrets/bff_client_secret";
+    delete relative.GOOGLE_OIDC_CLIENT_SECRET;
+    relative.GOOGLE_OIDC_CLIENT_SECRET_FILE =
+      "secrets/google_login_client_secret";
     expect(() => loadRuntimeConfig(relative, () => "value\n")).toThrow(
       /absolute path/u,
     );
 
     const multiline = validEnvironment();
-    delete multiline.KEYCLOAK_BFF_CLIENT_SECRET;
-    multiline.KEYCLOAK_BFF_CLIENT_SECRET_FILE =
-      "/run/secrets/bff_client_secret";
+    delete multiline.GOOGLE_OIDC_CLIENT_SECRET;
+    multiline.GOOGLE_OIDC_CLIENT_SECRET_FILE =
+      "/run/secrets/google_login_client_secret";
     expect(() => loadRuntimeConfig(multiline, () => "first\nsecond\n")).toThrow(
       /one non-empty secret value/u,
     );
@@ -174,8 +163,6 @@ describe("loadRuntimeConfig", () => {
         NODE_ENV: "production",
         ZEROSHEET_API_URL: "https://api.zerosheet.example",
         ZEROSHEET_WEB_URL: "https://zerosheet.example",
-        ZEROSHEET_OIDC_ISSUER_URL:
-          "https://identity.zerosheet.example/realms/zerosheet",
         OPENFGA_API_URL: "https://authorization.zerosheet.example",
         OPA_API_URL: "https://policy.zerosheet.example",
       }),
@@ -188,14 +175,28 @@ describe("loadRuntimeConfig", () => {
       NODE_ENV: "production",
       ZEROSHEET_API_URL: "https://zerosheet.example/api",
       ZEROSHEET_WEB_URL: "https://zerosheet.example",
-      ZEROSHEET_OIDC_ISSUER_URL:
-        "https://identity.zerosheet.example/realms/zerosheet",
       OPENFGA_API_URL: "http://127.0.0.1:8080",
       OPA_API_URL: "http://127.0.0.1:8181",
     });
 
     expect(config.authorization.allowInsecureHttp).toBe(true);
     expect(config.contextualAuthorization.allowInsecureHttp).toBe(true);
+  });
+
+  it("normalizes and validates an optional Google Workspace domain", () => {
+    const config = loadRuntimeConfig({
+      ...validEnvironment(),
+      GOOGLE_OIDC_HOSTED_DOMAIN: " Example.COM ",
+    });
+
+    expect(config.oidc.hostedDomain).toBe("example.com");
+
+    expect(() =>
+      loadRuntimeConfig({
+        ...validEnvironment(),
+        GOOGLE_OIDC_HOSTED_DOMAIN: "https://example.com/team",
+      }),
+    ).toThrow(/exact DNS domain/u);
   });
 
   it("refuses a non-loopback insecure authorization decision service", () => {

@@ -7,7 +7,7 @@ with login. There are two deliberately separate Google relationships:
 
 ```text
 Sign-in
-Browser -> Keycloak -> Google identity scopes -> Keycloak -> ZeroSheet session
+Browser -> Google identity scopes -> ZeroSheet callback -> ZeroSheet session
 
 Storage
 Authenticated browser -> ZeroSheet BFF -> Google Drive/Sheets consent
@@ -15,8 +15,8 @@ Browser <- short-lived access token <- ZeroSheet BFF
 Browser -> fixed Google Drive/Sheets APIs with encrypted protected cells
 ```
 
-In the first flow, Google is Keycloak's upstream identity provider and Keycloak
-is ZeroSheet's only OIDC issuer. In the second flow, ZeroSheet is Google's OAuth
+In the first flow, Google is ZeroSheet's direct OIDC issuer. In the second
+flow, ZeroSheet is Google's OAuth
 client and the grant authorizes API operations. A Google account chosen for
 storage may even differ from the account used to sign in; that changes storage
 authority, not the ZeroSheet product-user identity.
@@ -68,7 +68,7 @@ The adapter does not request broad `drive`, identity (`openid`, `email`,
 
 | Value                        | Location                                                | Lifetime and meaning                                                             |
 | ---------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Keycloak session selector    | HttpOnly browser cookie; digest in PostgreSQL           | Identifies the signed-in ZeroSheet session.                                      |
+| ZeroSheet session selector   | HttpOnly browser cookie; digest in PostgreSQL           | Identifies the signed-in ZeroSheet session.                                      |
 | Google client secret         | BFF deployment secret                                   | Authenticates the confidential OAuth client; never sent to browser code.         |
 | Google refresh token         | AES-256-GCM envelope in PostgreSQL                      | Durable authority to request short access tokens.                                |
 | Refresh-token encryption key | deployment secret outside PostgreSQL                    | Independent 32-byte key; not a recovery phrase or workbook key.                  |
@@ -126,7 +126,7 @@ Interactive Google testing requires manual project-owner configuration:
 3. Configure the Google Auth Platform branding/audience and add development
    test users when the app is in testing mode.
 4. Create a **Web application** OAuth client dedicated to ZeroSheet storage.
-   Do not reuse the Keycloak Google-login client.
+   Do not reuse the Google sign-in client.
 5. Add this exact local authorized redirect URI:
 
    ```text

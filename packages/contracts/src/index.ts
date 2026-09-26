@@ -9,7 +9,7 @@ export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 
 /**
  * This is the deliberately small identity projection that ZeroSheet returns to
- * its own browser. It contains product-facing data only; Keycloak access
+ * its own browser. It contains product-facing data only; Google access
  * tokens, refresh tokens, password credentials, and raw OIDC claims must never
  * cross the BFF boundary into browser JavaScript.
  */
@@ -23,7 +23,7 @@ export const AuthenticatedUserSchema = z.object({
  * A discriminated response lets the web application narrow the type by reading
  * `authenticated`. Returning the anonymous shape with HTTP 401 is intentional:
  * it is a normal session state, not an exception containing implementation
- * details about cookies, PostgreSQL, or Keycloak.
+ * details about cookies, PostgreSQL, or the Google OIDC exchange.
  */
 export const AuthSessionResponseSchema = z.discriminatedUnion("authenticated", [
   z.object({

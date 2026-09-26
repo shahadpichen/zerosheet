@@ -2,37 +2,25 @@ import * as client from "openid-client";
 import type { OidcConfig } from "../config.js";
 import type {
   ExternalIdentityProfile,
-  IdentityProviderHint,
   OidcGateway,
   PendingOidcAuthorization,
   StoredLoginTransaction,
 } from "./types.js";
 
 /**
- * Discovery retrieves Keycloak's authorization, token, logout, and JWKS
- * endpoints from the realm issuer. `openid-client` then owns protocol parsing,
- * signature verification, issuer/audience validation, PKCE, state, and nonce
- * checks. Reimplementing those security-sensitive standards ourselves would be
- * both harder to audit and easier to get subtly wrong.
+ * Discovery retrieves Google's authorization, token, and JWKS endpoints from
+ * its fixed issuer. `openid-client` then owns protocol parsing, signature
+ * verification, issuer/audience validation, PKCE, state, and nonce checks.
+ * Reimplementing those security-sensitive standards ourselves would be both
+ * harder to audit and easier to get subtly wrong.
  */
 export async function createOpenIdClientGateway(
   settings: OidcConfig,
 ): Promise<OidcGateway> {
-  const discoveryOptions: client.DiscoveryRequestOptions | undefined =
-    settings.allowInsecureHttp
-      ? {
-          // openid-client refuses HTTP by default. This explicit escape hatch is
-          // set only after config.ts proves the issuer is loopback and the
-          // process is not production.
-          execute: [client.allowInsecureRequests],
-        }
-      : undefined;
   const configuration = await client.discovery(
     settings.issuerUrl,
     settings.clientId,
     settings.clientSecret,
-    undefined,
-    discoveryOptions,
   );
 
   return new OpenIdClientGateway(configuration, settings);
@@ -44,9 +32,7 @@ class OpenIdClientGateway implements OidcGateway {
     private readonly settings: OidcConfig,
   ) {}
 
-  public async createAuthorizationRequest(
-    identityProviderHint?: IdentityProviderHint,
-  ): Promise<PendingOidcAuthorization> {
+  public async createAuthorizationRequest(): Promise<PendingOidcAuthorization> {
     const state = client.randomState();
     const nonce = client.randomNonce();
     const codeVerifier = client.randomPKCECodeVerifier();
@@ -60,16 +46,21 @@ class OpenIdClientGateway implements OidcGateway {
       nonce,
       code_challenge: codeChallenge,
       code_challenge_method: "S256",
+      /**
+       * A local ZeroSheet logout intentionally does not sign the person out of
+       * their whole Google account. Showing the chooser on the next login lets
+       * them select a different account without requiring a Google-wide logout.
+       */
+      prompt: "select_account",
     };
 
     /**
-     * `kc_idp_hint` is a Keycloak broker extension. It asks Keycloak to start
-     * with a named upstream provider, but it does not bypass Keycloak's broker
-     * callback, first-login flow, account-linking checks, or token issuance.
-     * ZeroSheet still validates only the Keycloak issuer.
+     * Google's `hd` request parameter narrows the account chooser, but request
+     * parameters are never authorization evidence. The callback validates the
+     * signed `hd` claim again before creating a ZeroSheet session.
      */
-    if (identityProviderHint) {
-      authorizationParameters.kc_idp_hint = identityProviderHint;
+    if (this.settings.hostedDomain) {
+      authorizationParameters.hd = this.settings.hostedDomain;
     }
 
     const authorizationUrl = client.buildAuthorizationUrl(
@@ -109,9 +100,20 @@ class OpenIdClientGateway implements OidcGateway {
     if (
       !claims ||
       typeof claims.sub !== "string" ||
-      typeof claims.email !== "string"
+      typeof claims.email !== "string" ||
+      claims.email_verified !== true
     ) {
       throw new Error("The verified ID token is missing required user claims");
+    }
+
+    if (
+      this.settings.hostedDomain &&
+      (typeof claims.hd !== "string" ||
+        claims.hd.toLowerCase() !== this.settings.hostedDomain)
+    ) {
+      throw new Error(
+        "The verified Google account does not belong to the required Workspace domain",
+      );
     }
 
     const displayName = this.displayName(claims, claims.email);
@@ -120,20 +122,9 @@ class OpenIdClientGateway implements OidcGateway {
       issuer: this.configuration.serverMetadata().issuer,
       subject: claims.sub,
       email: claims.email,
-      emailVerified: claims.email_verified === true,
+      emailVerified: true,
       displayName,
     };
-  }
-
-  public createLogoutUrl(): URL {
-    /**
-     * `buildEndSessionUrl` adds the registered client identifier. Keycloak can
-     * therefore validate the post-logout destination even though ZeroSheet does
-     * not persist the ID token after creating its own opaque session.
-     */
-    return client.buildEndSessionUrl(this.configuration, {
-      post_logout_redirect_uri: this.settings.postLogoutRedirectUrl.href,
-    });
   }
 
   private displayName(

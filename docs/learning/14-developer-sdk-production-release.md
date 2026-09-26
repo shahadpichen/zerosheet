@@ -91,7 +91,6 @@ Internet
   v
 Caddy ---------------------------------------------------+
   | app.example /api -> Fastify :3001                    |
-  | identity.example -> Keycloak :8080                   |
   +-------------------------------------------------------+
                            private Docker networks
        +---------------- shared network namespace ----------------+
@@ -99,13 +98,13 @@ Caddy ---------------------------------------------------+
        +----------------------------------------------------------+
                             |
                    PostgreSQL private network
-            zerosheet | keycloak | openfga databases
+                 zerosheet | openfga databases
 ```
 
 Same-origin `/api` routing is essential: `__Host-` session cookies are Secure,
 host-only, and Path `/`. Caddy strips `/api` before Fastify while public OIDC,
-SCIM, and Google callback URLs preserve it. Keycloak uses a separate public
-hostname because it is the issuer and interactive login server.
+SCIM, and Google callback URLs preserve it. The API reaches Google's fixed OIDC
+issuer over HTTPS through the egress network.
 
 OpenFGA and OPA use loopback HTTP only because they share the API's network
 namespace on this one host. Moving either service elsewhere without TLS is a
@@ -116,12 +115,11 @@ workloads.
 
 Use a supported 64-bit Linux distribution, create a non-root deployment user,
 install Docker Engine with Compose, and allow inbound TCP 22 (restricted where
-possible), 80, and 443 plus UDP 443. Do not publish PostgreSQL, Keycloak,
-OpenFGA, OPA, or API ports. Point two DNS A/AAAA records at the VPS:
+possible), 80, and 443 plus UDP 443. Do not publish PostgreSQL,
+OpenFGA, OPA, or API ports. Point the app DNS A/AAAA record at the VPS:
 
 ```text
 sheets.example.com    -> VPS
-identity.example.com  -> VPS
 ```
 
 Clone the repository and create operator state outside it:
@@ -156,7 +154,7 @@ export ZS_COMPOSE='docker compose --env-file /etc/zerosheet/environment --file i
 Run the durable stores and private policy namespace first:
 
 ```bash
-$ZS_COMPOSE up --detach --build postgres zerosheet-migrate keycloak policy-namespace openfga-migrate openfga opa caddy
+$ZS_COMPOSE up --detach --build postgres zerosheet-migrate policy-namespace openfga-migrate openfga opa caddy
 $ZS_COMPOSE --profile bootstrap run --rm openfga-provision
 sudo cat /var/lib/zerosheet/state/openfga.env
 ```
@@ -168,27 +166,22 @@ documented placeholders. Then start/reconcile the complete stack:
 $ZS_COMPOSE up --detach --build
 $ZS_COMPOSE ps
 curl --fail https://sheets.example.com/api/health
-curl --fail https://identity.example.com/realms/zerosheet/.well-known/openid-configuration
 ```
-
-The Keycloak master admin surface is blocked by Caddy. Use `kcadm.sh` through
-an SSH session/container exec for deliberate administration rather than
-publishing `/admin` to the internet.
 
 ## Google production setup
 
 Create separate Google OAuth clients:
 
-- Keycloak sign-in redirect:
-  `https://identity.example.com/realms/zerosheet/broker/google/endpoint`
+- ZeroSheet sign-in callback:
+  `https://sheets.example.com/api/auth/callback`
 - ZeroSheet Drive/Sheets callback:
   `https://sheets.example.com/api/google/storage/callback`
 
 Enable Drive and Sheets APIs only for the storage client, replace the two
-sentinel secret files, set real client IDs, configure/enable the Keycloak Google
-provider, then set `GOOGLE_STORAGE_OAUTH_ENABLED=true` only after its consent
+sentinel secret files and set real client IDs. Set
+`GOOGLE_STORAGE_OAUTH_ENABLED=true` only after its consent
 screen and exact callback are verified. Restart affected services after secret
-rotation. Google identity federation and delegated storage remain separate
+rotation. Google identity and delegated storage remain separate
 consents with different scopes and secrets.
 
 ## Operations and recovery
@@ -213,7 +206,7 @@ sudo infra/scripts/backup-production-databases.sh \
 ```
 
 Copy the timestamped directory off-site. On a separate trusted machine, prove
-all three archives restore without touching a live volume:
+both archives restore without touching a live volume:
 
 ```bash
 infra/scripts/drill-production-restore.sh \
@@ -247,7 +240,7 @@ set. CI can add image signing/SBOM publishing when a registry is selected.
 - monitored off-site backup schedule with repeated restore evidence;
 - alert routing, incident response, retention policy, and privacy terms;
 - dependency/SBOM/container scanning and signed registry releases;
-- high-availability PostgreSQL/Keycloak and a multi-node SPIFFE topology;
+- high-availability PostgreSQL and a multi-node SPIFFE topology;
 - browser release integrity controls and a reviewed extension/offline strategy;
 - load tests based on real traffic and a move beyond 2 GB before an SLA.
 

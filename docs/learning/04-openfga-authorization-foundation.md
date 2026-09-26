@@ -14,7 +14,7 @@ The previous milestones answer:
 Who authenticated?
 ```
 
-Keycloak verifies the login and ZeroSheet maps the Keycloak `(issuer, subject)`
+Google verifies the login and ZeroSheet maps the Google `(issuer, subject)`
 to a stable product-user UUID. That does not answer:
 
 ```text
@@ -92,7 +92,7 @@ It contains four domain types.
 ### `user`
 
 The ID is the ZeroSheet product-user UUID. It is not an email address, Google
-subject, or Keycloak subject. Authentication providers can change without
+subject, or Google subject. Authentication providers can change without
 rewriting resource relationships.
 
 ### `organization`
@@ -210,7 +210,7 @@ key envelope must not make the API ignore an OpenFGA revocation.
 ## Local infrastructure
 
 OpenFGA 1.18.1 runs as an independent server and owns the existing isolated
-`openfga` PostgreSQL database. It cannot connect to ZeroSheet or Keycloak data.
+`openfga` PostgreSQL database. It cannot connect to ZeroSheet data.
 
 The Compose flow is:
 

@@ -5,7 +5,7 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuthCookieConfig, AuthLifetimeConfig } from "../config.js";
 import { AuthenticationFlowError } from "./auth-service.js";
-import type { AuthApplicationService, IdentityProviderHint } from "./types.js";
+import type { AuthApplicationService } from "./types.js";
 
 export interface AuthRouteOptions {
   service: AuthApplicationService;
@@ -31,7 +31,7 @@ function protectAuthenticationResponse(reply: FastifyReply): void {
 
 /**
  * We reconstruct the callback from the configured, registered redirect URI and
- * only copy the query string supplied by Keycloak. Trusting an arbitrary Host
+ * only copy the query string supplied by Google. Trusting an arbitrary Host
  * or forwarded-host header here could make token validation use an attacker-
  * controlled callback URL when the service later runs behind a reverse proxy.
  */
@@ -46,17 +46,15 @@ function configuredCallbackUrl(request: FastifyRequest, callbackUrl: URL): URL {
 }
 
 /**
- * Both login buttons create the same protected transaction and cookie. The
- * optional hint only chooses the first Keycloak screen; keeping this behavior
- * in one function prevents the Google shortcut from drifting into a weaker
- * authentication flow later.
+ * Both public login routes create the same direct-Google transaction and
+ * cookie. Keeping the compatibility alias in one function prevents an older
+ * bookmark from drifting into a weaker authentication flow later.
  */
 async function startLogin(
   reply: FastifyReply,
   options: AuthRouteOptions,
-  identityProviderHint?: IdentityProviderHint,
 ): Promise<FastifyReply> {
-  const login = await options.service.beginLogin(identityProviderHint);
+  const login = await options.service.beginLogin();
 
   reply.setCookie(
     options.cookies.loginTransactionName,
@@ -71,7 +69,7 @@ async function startLogin(
   );
 
   // A normal 302 is appropriate because both the incoming request and the
-  // Keycloak authorization endpoint use GET.
+  // Google authorization endpoint use GET.
   return reply.redirect(login.authorizationUrl.href, 302);
 }
 
@@ -89,10 +87,9 @@ export function registerAuthRoutes(
   });
 
   app.get("/auth/login/google", async (_request, reply) => {
-    // The route owns the fixed alias. We deliberately do not accept a provider
-    // name from a request parameter because only reviewed providers should be
-    // able to participate in the authentication trust chain.
-    return startLogin(reply, options, "google");
+    // Keep this explicit route because the UI names Google. It is an alias, not
+    // a provider selector: ZeroSheet now trusts exactly one human OIDC issuer.
+    return startLogin(reply, options);
   });
 
   app.get("/auth/callback", async (request, reply) => {
@@ -173,10 +170,11 @@ export function registerAuthRoutes(
     });
 
     /**
-     * Local deletion ends the ZeroSheet session. Redirecting through Keycloak's
-     * registered logout endpoint also ends the identity-provider SSO session,
-     * so pressing Login again does not silently recreate a product session.
+     * Google does not expose an OIDC end-session endpoint, and ZeroSheet must
+     * not sign the person out of every Google product in their browser. Delete
+     * only the product session and return to the application. The next login
+     * uses `prompt=select_account` so another Google account can be chosen.
      */
-    return reply.redirect(options.service.logoutUrl().href, 303);
+    return reply.redirect(options.successfulLoginRedirectUrl.href, 303);
   });
 }
