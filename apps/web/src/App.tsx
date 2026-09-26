@@ -5,19 +5,9 @@ import {
   type GoogleStorageConnectionStatus,
 } from "@zerosheet/contracts";
 import { ENCRYPTED_CELL_PREFIX } from "@zerosheet/crypto";
-import {
-  ArrowRight,
-  Check,
-  Cloud,
-  CloudOff,
-  KeyRound,
-  LoaderCircle,
-  LockKeyhole,
-  RefreshCw,
-  ShieldCheck,
-  TableProperties,
-} from "lucide-react";
+import { Check, Cloud, CloudOff, LoaderCircle, RefreshCw } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
+import { LandingPage } from "./LandingPage.js";
 import { AppHeader } from "./components/app-header.js";
 import { Badge } from "./components/ui/badge.js";
 import { Button } from "./components/ui/button.js";
@@ -29,7 +19,6 @@ import {
   CardHeader,
   CardTitle,
 } from "./components/ui/card.js";
-import { Separator } from "./components/ui/separator.js";
 import { clearGoogleStorageAccess } from "./google-storage.js";
 
 const EncryptedSheetEditor = lazy(async () => {
@@ -157,10 +146,12 @@ export function App(): React.JSX.Element {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <AppHeader user={user} />
+      {/* The public page owns ZeroDrive's sparse marketing header. Product
+          states retain the authenticated header and account controls. */}
+      {session.status !== "anonymous" && <AppHeader user={user} />}
 
       {session.status === "loading" && <LoadingScreen />}
-      {session.status === "anonymous" && <AnonymousHome />}
+      {session.status === "anonymous" && <LandingPage />}
       {session.status === "unavailable" && <UnavailableScreen />}
       {session.status === "authenticated" && (
         <AuthenticatedWorkspace
@@ -170,111 +161,6 @@ export function App(): React.JSX.Element {
         />
       )}
     </div>
-  );
-}
-
-/**
- * Public onboarding exposes only direct Google OIDC. The API retains a
- * compatibility `/auth/login` alias for older bookmarks, but customer UI
- * intentionally presents one supported sign-in choice.
- */
-function AnonymousHome(): React.JSX.Element {
-  const guarantees = [
-    {
-      icon: LockKeyhole,
-      title: "Cell-level privacy",
-      copy: "Protect a selection or full columns before data reaches Google.",
-    },
-    {
-      icon: KeyRound,
-      title: "Keys stay with people",
-      copy: "Recovery and workbook keys are created and opened in the browser.",
-    },
-    {
-      icon: ShieldCheck,
-      title: "Enterprise access",
-      copy: "Google identifies you; OpenFGA roles and policy checks decide workbook access.",
-    },
-  ] as const;
-
-  return (
-    <main>
-      <section className="relative overflow-hidden border-b">
-        <div className="sheet-grid-background pointer-events-none absolute inset-0" />
-        <div className="relative mx-auto grid max-w-6xl gap-12 px-5 py-16 sm:px-6 sm:py-24 lg:grid-cols-[1fr_420px] lg:items-center lg:px-8 lg:py-28">
-          <div>
-            <Badge variant="accent" className="mb-6 gap-2">
-              <ShieldCheck className="h-3.5 w-3.5" />
-              End-to-end encrypted spreadsheets
-            </Badge>
-            <h1 className="max-w-3xl text-3xl font-medium leading-tight tracking-tight sm:text-5xl lg:text-6xl">
-              Keep the spreadsheet. Hide the sensitive cells.
-            </h1>
-            <p className="mt-6 max-w-2xl text-sm font-light leading-7 text-muted-foreground sm:text-base">
-              ZeroSheet adds browser-owned encryption and enterprise access
-              controls to Google Sheets. Teams keep familiar collaboration;
-              Google and the ZeroSheet server receive ciphertext for fields you
-              mark private.
-            </p>
-
-            <div className="mt-8 grid gap-4 sm:grid-cols-3">
-              {guarantees.map(({ icon: Icon, title, copy }) => (
-                <div key={title} className="border bg-background/70 p-4">
-                  <Icon className="mb-4 h-5 w-5" aria-hidden="true" />
-                  <h2 className="text-sm font-semibold">{title}</h2>
-                  <p className="mt-2 text-xs font-light leading-5 text-muted-foreground">
-                    {copy}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <Card className="bg-card/95 shadow-xl">
-            <CardHeader>
-              <div className="mb-4 flex h-11 w-11 items-center justify-center border bg-foreground text-background">
-                <TableProperties className="h-5 w-5" aria-hidden="true" />
-              </div>
-              <CardTitle className="text-xl">Open your workspace</CardTitle>
-              <CardDescription>
-                Google proves your identity directly to the ZeroSheet BFF.
-                ZeroSheet never sees your Google password.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button asChild size="lg" className="w-full">
-                <a href="/api/auth/login/google">
-                  <span
-                    aria-hidden="true"
-                    className="flex h-5 w-5 items-center justify-center border border-current text-xs font-bold"
-                  >
-                    G
-                  </span>
-                  Continue with Google
-                  <ArrowRight />
-                </a>
-              </Button>
-              <p className="mt-4 text-center text-xs leading-5 text-muted-foreground">
-                Drive access is requested separately after sign-in, only when
-                you choose to connect storage.
-              </p>
-            </CardContent>
-            <CardFooter className="flex-col items-stretch gap-3">
-              <Separator />
-              <p className="text-xs font-light leading-5 text-muted-foreground">
-                Your 12-word recovery phrase is never sent to Google or the
-                ZeroSheet API.
-              </p>
-            </CardFooter>
-          </Card>
-        </div>
-      </section>
-
-      <footer className="mx-auto flex max-w-6xl flex-col gap-2 px-5 py-8 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
-        <span>ZeroSheet · privacy by architecture</span>
-        <span>Google stores sheets · your browser owns plaintext</span>
-      </footer>
-    </main>
   );
 }
 

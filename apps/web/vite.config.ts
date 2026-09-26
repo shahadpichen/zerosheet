@@ -2,6 +2,15 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 
+/**
+ * The default matches the normal ZeroSheet API port. A narrow override lets a
+ * developer preview the frontend while another local project already owns
+ * port 3001; it changes only Vite's private proxy target and never changes a
+ * browser-visible production URL.
+ */
+const developmentApiTarget =
+  process.env.ZEROSHEET_DEV_API_TARGET ?? "http://localhost:3001";
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -27,7 +36,7 @@ export default defineConfig({
        * CORS merely to carry an HttpOnly session cookie.
        */
       "/api": {
-        target: "http://localhost:3001",
+        target: developmentApiTarget,
         changeOrigin: false,
         rewrite: (path) => path.replace(/^\/api/u, ""),
       },
