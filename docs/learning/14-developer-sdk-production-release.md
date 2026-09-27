@@ -170,19 +170,19 @@ curl --fail https://sheets.example.com/api/health
 
 ## Google production setup
 
-Create separate Google OAuth clients:
+Create one Google **Web application** OAuth client with both redirect URIs:
 
 - ZeroSheet sign-in callback:
   `https://sheets.example.com/api/auth/callback`
 - ZeroSheet Drive/Sheets callback:
   `https://sheets.example.com/api/google/storage/callback`
 
-Enable Drive and Sheets APIs only for the storage client, replace the two
-sentinel secret files and set real client IDs. Set
+Enable Drive and Sheets APIs on its Google Cloud project, replace the single
+`google_oauth_client_secret` sentinel file and set `GOOGLE_OAUTH_CLIENT_ID`. Set
 `GOOGLE_STORAGE_OAUTH_ENABLED=true` only after its consent
 screen and exact callback are verified. Restart affected services after secret
-rotation. Google identity and delegated storage remain separate
-consents with different scopes and secrets.
+rotation. With storage enabled, login requests identity and storage scopes
+together; the second callback is only for reconnecting an existing session.
 
 ## Operations and recovery
 

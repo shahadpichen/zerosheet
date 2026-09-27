@@ -60,7 +60,7 @@ export function LandingPage(): React.JSX.Element {
           <div className="mt-8 flex flex-col items-center">
             <GoogleAuth />
             <p className="mt-4 text-sm text-muted-foreground">
-              Google sign-in first — Drive access is requested separately
+              Sign in and connect Google Drive in one step
             </p>
           </div>
         </div>

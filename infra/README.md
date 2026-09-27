@@ -112,7 +112,7 @@ in process memory and is scanned out of all captured verification output.
 Milestone 11 adds `pnpm infra:google-storage:verify`. It verifies the browser
 Drive/Sheets adapter, server OAuth service and route boundary, refresh-token
 protection, and live migration 005 schema without requiring a Google account or
-printing credentials. Real Google consent uses the separate storage OAuth client
+printing credentials. Real Google storage consent uses the same web client as sign-in,
 described in `docs/learning/11-google-delegated-storage.md`.
 
 The Docker agent's host PID namespace and Docker daemon socket are a deliberate

@@ -5,6 +5,7 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuthCookieConfig, AuthLifetimeConfig } from "../config.js";
 import { AuthenticationFlowError } from "./auth-service.js";
+import { GoogleStorageOnboardingError } from "../google-storage/errors.js";
 import type { AuthApplicationService } from "./types.js";
 
 export interface AuthRouteOptions {
@@ -124,6 +125,17 @@ export function registerAuthRoutes(
 
       return reply.redirect(options.successfulLoginRedirectUrl.href, 303);
     } catch (error) {
+      if (error instanceof GoogleStorageOnboardingError) {
+        // Only an allowlisted error category returns to our configured UI.
+        // Never forward Google's code, error text, state, or any token in a URL.
+        request.log.warn("Google storage onboarding incomplete");
+        const retryUrl = new URL(options.successfulLoginRedirectUrl);
+        retryUrl.searchParams.set(
+          "auth_error",
+          "google_storage_setup_required",
+        );
+        return reply.redirect(retryUrl.href, 303);
+      }
       if (error instanceof AuthenticationFlowError) {
         // Record only the safe event name. The callback URL and underlying
         // protocol exception may contain authorization credentials.

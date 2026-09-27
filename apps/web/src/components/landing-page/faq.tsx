@@ -20,9 +20,9 @@ const FAQS: readonly {
       "ZeroSheet cannot reset it or bypass the encryption. You may permanently lose the ability to open your encrypted private-key backup and the workbook keys shared with that identity.",
   },
   {
-    question: "Why are sign-in and Drive access separate?",
+    question: "Why does signing in request Google Drive access?",
     answer:
-      "Google sign-in proves your identity. Drive/Sheets OAuth grants storage access. Keeping them separate makes the permissions visible and lets you disconnect storage without deleting your ZeroSheet identity.",
+      "One Google consent flow signs you in and connects your spreadsheet storage. ZeroSheet requests access to app-created or selected files and its hidden encrypted-backup folder, not every file in your Drive. These permissions do not reveal your recovery phrase or decrypt protected cells.",
   },
   {
     question: "Where do roles live without Keycloak?",

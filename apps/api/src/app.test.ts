@@ -1,9 +1,12 @@
 import type {
   AuthenticatedUser,
+  GoogleStorageConnectionStatus,
   RegisterEncryptionIdentityInput,
 } from "@zerosheet/contracts";
+import { GoogleStorageConnectionStatusSchema } from "@zerosheet/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { AuthenticationFlowError } from "./auth/auth-service.js";
+import { GoogleStorageOnboardingError } from "./google-storage/errors.js";
 import type { AuthApplicationService } from "./auth/types.js";
 import { buildApp } from "./app.js";
 import type { RuntimeConfig } from "./config.js";
@@ -51,6 +54,7 @@ const testUser: AuthenticatedUser = {
 class FakeAuthService implements AuthApplicationService {
   public user: AuthenticatedUser | null = null;
   public failCallback = false;
+  public failStorageSetup = false;
   public callbackTransactionToken: string | undefined;
   public loggedOutToken: string | undefined;
 
@@ -68,6 +72,9 @@ class FakeAuthService implements AuthApplicationService {
     transactionToken: string | undefined,
   ) {
     this.callbackTransactionToken = transactionToken;
+
+    if (this.failStorageSetup)
+      return Promise.reject(new GoogleStorageOnboardingError());
 
     if (this.failCallback) {
       return Promise.reject(new AuthenticationFlowError());
@@ -302,14 +309,18 @@ class FakeAuditService implements AuditApplicationService {
 }
 
 /**
- * Google Drive consent is independent from product authentication, so the HTTP
- * test composition gets a separate fake. Recording arguments proves routes
+ * Google storage has its own service even though sign-in now includes consent,
+ * so the HTTP test composition gets a separate fake. Recording arguments proves routes
  * pass the authenticated product user and the HttpOnly transaction selector
  * into the application service without exposing either value in a response.
  */
 class FakeGoogleStorageService implements GoogleStorageApplicationService {
   public configured = true;
   public connected = false;
+  public grantedScopes = [
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/drive.appdata",
+  ];
   public completedInput:
     | {
         readonly userId: string;
@@ -321,14 +332,24 @@ class FakeGoogleStorageService implements GoogleStorageApplicationService {
     { readonly userId: string; readonly forceRefresh: boolean } | undefined;
   public disconnectedUserId: string | undefined;
 
-  public status() {
+  public status(): Promise<GoogleStorageConnectionStatus> {
+    const requiredScopes = [
+      "https://www.googleapis.com/auth/drive.file",
+      "https://www.googleapis.com/auth/drive.appdata",
+    ];
+    if (this.connected) {
+      return Promise.resolve({
+        configured: true,
+        connected: true,
+        requiredScopes,
+        grantedScopes: this.grantedScopes,
+        connectedAt: "2026-09-26T19:00:00.000Z",
+      });
+    }
     return Promise.resolve({
       configured: this.configured,
       connected: false as const,
-      requiredScopes: [
-        "https://www.googleapis.com/auth/drive.file",
-        "https://www.googleapis.com/auth/drive.appdata",
-      ],
+      requiredScopes,
     });
   }
 
@@ -455,12 +476,15 @@ function testConfig(): RuntimeConfig {
       password: "test-only-password",
       useTls: false,
     },
+    googleOAuthClient: {
+      clientId: "shared-client.apps.googleusercontent.com",
+      clientSecret: "test-only-secret",
+    },
     oidc: {
       issuerUrl: new URL("https://accounts.google.com"),
-      clientId: "login-client.apps.googleusercontent.com",
-      clientSecret: "test-only-secret",
       callbackUrl: new URL("http://localhost:3001/auth/callback"),
       hostedDomain: undefined,
+      connectStorageOnLogin: false,
     },
     authorization: {
       apiUrl: new URL("http://127.0.0.1:8082"),
@@ -617,6 +641,30 @@ describe("ZeroSheet HTTP authentication boundary", () => {
       error: "authentication_failed",
       message: "The login could not be completed. Please start again.",
     });
+  });
+
+  it("returns incomplete storage onboarding to a safe retry page without a session", async () => {
+    const service = new FakeAuthService();
+    service.failStorageSetup = true;
+    const { app } = makeApp(service);
+    apps.push(app);
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/callback?code=sensitive-code&state=sensitive-state",
+      cookies: { zerosheet_oidc_transaction: "browser-transaction-token" },
+    });
+    expect(response.statusCode).toBe(303);
+    expect(response.headers.location).toBe(
+      "http://localhost:5173/?auth_error=google_storage_setup_required",
+    );
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.headers["set-cookie"]).toContain(
+      "zerosheet_oidc_transaction=;",
+    );
+    expect(JSON.stringify(response.headers)).not.toContain(
+      "zerosheet_session=",
+    );
+    expect(JSON.stringify(response.headers)).not.toContain("sensitive-");
   });
 
   it("returns 401 without a valid product session", async () => {
@@ -1005,6 +1053,52 @@ describe("ZeroSheet SCIM lifecycle boundary", () => {
 });
 
 describe("ZeroSheet delegated Google storage boundary", () => {
+  // Google's combined grant includes bare `openid` alongside URL-shaped Drive
+  // scopes. Reproduce the real status request that previously returned 500.
+  it.each([
+    ["openid", "email", "profile"],
+    [
+      "openid",
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile",
+    ],
+  ])(
+    "reports a connected combined grant with identity scopes %j",
+    async (...identityScopes) => {
+      const setup = makeApp();
+      setup.service.user = testUser;
+      setup.googleStorageService.connected = true;
+      setup.googleStorageService.grantedScopes.push(...identityScopes);
+      apps.push(setup.app);
+
+      const response = await setup.app.inject({
+        method: "GET",
+        url: "/google/storage/status",
+        cookies: { zerosheet_session: "opaque-browser-session" },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        connected: true,
+        grantedScopes: setup.googleStorageService.grantedScopes,
+      });
+      expect(response.headers["cache-control"]).toBe("no-store");
+    },
+  );
+
+  it.each(["", "openid email", "openid\n", 'scope"', "scope\\", "scopé"])(
+    "rejects malformed scope tokens in connection status: %j",
+    async (invalidScope) => {
+      const storage = new FakeGoogleStorageService();
+      storage.connected = true;
+      storage.grantedScopes.push(invalidScope);
+      expect(
+        GoogleStorageConnectionStatusSchema.safeParse(await storage.status())
+          .success,
+      ).toBe(false);
+    },
+  );
+
   it("requires the product session before revealing connection status", async () => {
     const { app } = makeApp();
     apps.push(app);

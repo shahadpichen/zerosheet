@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { loadRuntimeConfig } from "./config.js";
 
 /**
@@ -13,8 +13,8 @@ function validEnvironment(): NodeJS.ProcessEnv {
     ZEROSHEET_DB_NAME: "zerosheet",
     ZEROSHEET_DB_USER: "zerosheet_app",
     ZEROSHEET_DB_PASSWORD: "test-only-password",
-    GOOGLE_OIDC_CLIENT_ID: "login-client.apps.googleusercontent.com",
-    GOOGLE_OIDC_CLIENT_SECRET: "test-only-client-secret",
+    GOOGLE_OAUTH_CLIENT_ID: "login-client.apps.googleusercontent.com",
+    GOOGLE_OAUTH_CLIENT_SECRET: "test-only-client-secret",
     OPENFGA_API_URL: "http://127.0.0.1:8082",
     OPENFGA_STORE_ID: "01H00000000000000000000000",
     OPENFGA_AUTHORIZATION_MODEL_ID: "01H00000000000000000000001",
@@ -32,6 +32,7 @@ describe("loadRuntimeConfig", () => {
     );
     expect(config.oidc.issuerUrl.href).toBe("https://accounts.google.com/");
     expect(config.oidc.hostedDomain).toBeUndefined();
+    expect(config.oidc.connectStorageOnLogin).toBe(false);
     expect(config.authCookies).toEqual({
       secure: false,
       loginTransactionName: "zerosheet_oidc_transaction",
@@ -97,26 +98,26 @@ describe("loadRuntimeConfig", () => {
 
   it("fails fast when the confidential client secret is missing", () => {
     const environment = validEnvironment();
-    delete environment.GOOGLE_OIDC_CLIENT_SECRET;
+    delete environment.GOOGLE_OAUTH_CLIENT_SECRET;
 
     expect(() => loadRuntimeConfig(environment)).toThrow(
-      /GOOGLE_OIDC_CLIENT_SECRET/u,
+      /GOOGLE_OAUTH_CLIENT_SECRET/u,
     );
   });
 
   it("loads sensitive values from absolute mounted files", () => {
     const environment = validEnvironment();
     delete environment.ZEROSHEET_DB_PASSWORD;
-    delete environment.GOOGLE_OIDC_CLIENT_SECRET;
+    delete environment.GOOGLE_OAUTH_CLIENT_SECRET;
     delete environment.OPENFGA_PRESHARED_KEY;
     environment.ZEROSHEET_DB_PASSWORD_FILE = "/run/secrets/database_password";
-    environment.GOOGLE_OIDC_CLIENT_SECRET_FILE =
-      "/run/secrets/google_login_client_secret";
+    environment.GOOGLE_OAUTH_CLIENT_SECRET_FILE =
+      "/run/secrets/google_oauth_client_secret";
     environment.OPENFGA_PRESHARED_KEY_FILE = "/run/secrets/openfga_key";
 
     const values = new Map([
       ["/run/secrets/database_password", "database-value\n"],
-      ["/run/secrets/google_login_client_secret", "client-value\n"],
+      ["/run/secrets/google_oauth_client_secret", "client-value\n"],
       ["/run/secrets/openfga_key", "authorization-value\n"],
     ]);
     const config = loadRuntimeConfig(environment, (path) => {
@@ -126,7 +127,7 @@ describe("loadRuntimeConfig", () => {
     });
 
     expect(config.database.password).toBe("database-value");
-    expect(config.oidc.clientSecret).toBe("client-value");
+    expect(config.googleOAuthClient.clientSecret).toBe("client-value");
     expect(config.authorization.apiToken).toBe("authorization-value");
   });
 
@@ -134,23 +135,23 @@ describe("loadRuntimeConfig", () => {
     expect(() =>
       loadRuntimeConfig({
         ...validEnvironment(),
-        GOOGLE_OIDC_CLIENT_SECRET_FILE:
-          "/run/secrets/google_login_client_secret",
+        GOOGLE_OAUTH_CLIENT_SECRET_FILE:
+          "/run/secrets/google_oauth_client_secret",
       }),
     ).toThrow(/cannot both be set/u);
 
     const relative = validEnvironment();
-    delete relative.GOOGLE_OIDC_CLIENT_SECRET;
-    relative.GOOGLE_OIDC_CLIENT_SECRET_FILE =
-      "secrets/google_login_client_secret";
+    delete relative.GOOGLE_OAUTH_CLIENT_SECRET;
+    relative.GOOGLE_OAUTH_CLIENT_SECRET_FILE =
+      "secrets/google_oauth_client_secret";
     expect(() => loadRuntimeConfig(relative, () => "value\n")).toThrow(
       /absolute path/u,
     );
 
     const multiline = validEnvironment();
-    delete multiline.GOOGLE_OIDC_CLIENT_SECRET;
-    multiline.GOOGLE_OIDC_CLIENT_SECRET_FILE =
-      "/run/secrets/google_login_client_secret";
+    delete multiline.GOOGLE_OAUTH_CLIENT_SECRET;
+    multiline.GOOGLE_OAUTH_CLIENT_SECRET_FILE =
+      "/run/secrets/google_oauth_client_secret";
     expect(() => loadRuntimeConfig(multiline, () => "first\nsecond\n")).toThrow(
       /one non-empty secret value/u,
     );
@@ -226,27 +227,32 @@ describe("loadRuntimeConfig", () => {
     ).toThrow(/infra:authorization:provision/u);
   });
 
-  it("requires independent storage OAuth secrets only when enabled", () => {
+  it("enables storage with the shared client and only an additional token-encryption key", () => {
     expect(() =>
       loadRuntimeConfig({
         ...validEnvironment(),
         GOOGLE_STORAGE_OAUTH_ENABLED: "true",
       }),
-    ).toThrow(/GOOGLE_STORAGE_OAUTH_CLIENT_ID/u);
+    ).toThrow(/GOOGLE_STORAGE_TOKEN_ENCRYPTION_KEY/u);
 
     const config = loadRuntimeConfig({
       ...validEnvironment(),
       GOOGLE_STORAGE_OAUTH_ENABLED: "true",
-      GOOGLE_STORAGE_OAUTH_CLIENT_ID:
-        "storage-client.apps.googleusercontent.com",
-      GOOGLE_STORAGE_OAUTH_CLIENT_SECRET: "test-only-google-secret",
       GOOGLE_STORAGE_TOKEN_ENCRYPTION_KEY:
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     });
     expect(config.googleStorage).toMatchObject({
       enabled: true,
-      clientId: "storage-client.apps.googleusercontent.com",
     });
+    expect(config.googleOAuthClient.clientId).toBe(
+      validEnvironment().GOOGLE_OAUTH_CLIENT_ID,
+    );
+    expect(config.oidc.connectStorageOnLogin).toBe(true);
+    // Flow settings must not grow their own credential copies again.
+    expect(config.oidc).not.toHaveProperty("clientId");
+    expect(config.oidc).not.toHaveProperty("clientSecret");
+    expect(config.googleStorage).not.toHaveProperty("clientId");
+    expect(config.googleStorage).not.toHaveProperty("clientSecret");
     expect(
       config.googleStorage.enabled
         ? config.googleStorage.tokenEncryptionKey.byteLength
@@ -254,27 +260,30 @@ describe("loadRuntimeConfig", () => {
     ).toBe(32);
   });
 
-  it("loads the Google OAuth secrets and token key from mounted files", () => {
-    const environment = {
+  it("reads one mounted client secret even when both flows are enabled", () => {
+    const environment: NodeJS.ProcessEnv = {
       ...validEnvironment(),
       GOOGLE_STORAGE_OAUTH_ENABLED: "true",
-      GOOGLE_STORAGE_OAUTH_CLIENT_ID:
-        "storage-client.apps.googleusercontent.com",
-      GOOGLE_STORAGE_OAUTH_CLIENT_SECRET_FILE:
-        "/run/secrets/google_storage_client_secret",
+      GOOGLE_OAUTH_CLIENT_SECRET_FILE:
+        "/run/secrets/google_oauth_client_secret",
       GOOGLE_STORAGE_TOKEN_ENCRYPTION_KEY_FILE:
         "/run/secrets/google_storage_token_key",
     };
-    const config = loadRuntimeConfig(environment, (path) =>
+    delete environment.GOOGLE_OAUTH_CLIENT_SECRET;
+    const readSecret = vi.fn((path: string) =>
       path.endsWith("client_secret")
         ? "google-secret\n"
         : "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n",
     );
 
-    expect(config.googleStorage).toMatchObject({
-      enabled: true,
-      clientSecret: "google-secret",
-    });
+    const config = loadRuntimeConfig(environment, readSecret);
+    expect(config.googleOAuthClient.clientSecret).toBe("google-secret");
+    expect(
+      readSecret.mock.calls.filter(
+        ([path]) => path === "/run/secrets/google_oauth_client_secret",
+      ),
+    ).toHaveLength(1);
+    expect(config.googleStorage.enabled).toBe(true);
   });
 
   it("rejects a malformed Google refresh-token encryption key", () => {
@@ -282,11 +291,26 @@ describe("loadRuntimeConfig", () => {
       loadRuntimeConfig({
         ...validEnvironment(),
         GOOGLE_STORAGE_OAUTH_ENABLED: "true",
-        GOOGLE_STORAGE_OAUTH_CLIENT_ID:
-          "storage-client.apps.googleusercontent.com",
-        GOOGLE_STORAGE_OAUTH_CLIENT_SECRET: "test-only-google-secret",
         GOOGLE_STORAGE_TOKEN_ENCRYPTION_KEY: "too-short",
       }),
     ).toThrow(/exactly 32 bytes/u);
+  });
+
+  it.each([
+    "GOOGLE_OIDC_CLIENT_ID",
+    "GOOGLE_OIDC_CLIENT_SECRET",
+    "GOOGLE_OIDC_CLIENT_SECRET_FILE",
+    "GOOGLE_STORAGE_OAUTH_CLIENT_ID",
+    "GOOGLE_STORAGE_OAUTH_CLIENT_SECRET",
+    "GOOGLE_STORAGE_OAUTH_CLIENT_SECRET_FILE",
+  ])("rejects the retired %s instead of silently choosing a client", (name) => {
+    const environment = { ...validEnvironment(), [name]: "retired-test-value" };
+    expect(() => loadRuntimeConfig(environment)).toThrow(`${name} is retired`);
+    expect(() => loadRuntimeConfig(environment)).toThrow(
+      /GOOGLE_OAUTH_CLIENT_ID/u,
+    );
+    expect(() => loadRuntimeConfig(environment)).not.toThrow(
+      /retired-test-value/u,
+    );
   });
 });

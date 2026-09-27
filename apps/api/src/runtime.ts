@@ -1,4 +1,4 @@
-import { AuthService } from "./auth/auth-service.js";
+import { AuthService, type AuthServiceOptions } from "./auth/auth-service.js";
 import { AuditService } from "./audit/audit-service.js";
 import { PostgresAuditRepository } from "./audit/postgres-audit-repository.js";
 import { createOpenIdClientGateway } from "./auth/openid-client-gateway.js";
@@ -24,6 +24,8 @@ import { AesGcmGoogleRefreshTokenProtector } from "./google-storage/refresh-toke
 import type { GoogleStorageApplicationService } from "./google-storage/types.js";
 import { PostgresWorkbookSecurityRepository } from "./encryption/postgres-workbook-security-repository.js";
 import { WorkbookSecurityService } from "./encryption/workbook-security-service.js";
+import { PostgresWorkspaceRepository } from "./workspace/repository.js";
+import { WorkspaceService } from "./workspace/service.js";
 
 /**
  * This composition root is the only place that chooses concrete adapters.
@@ -41,6 +43,8 @@ export async function createRuntimeApp() {
     await repository.assertReady();
     const productRepository = new PostgresProductRepository(pool);
     await productRepository.assertReady();
+    const workspaceRepository = new PostgresWorkspaceRepository(pool);
+    await workspaceRepository.assertReady();
     const policyContextRepository = new PostgresPolicyContextRepository(pool);
     await policyContextRepository.assertReady();
     const auditRepository = new PostgresAuditRepository(pool);
@@ -52,12 +56,6 @@ export async function createRuntimeApp() {
     );
     await workbookSecurityRepository.assertReady();
 
-    const oidc = await createOpenIdClientGateway(config.oidc);
-    const authService = new AuthService({
-      repository,
-      oidc,
-      lifetimes: config.authLifetimes,
-    });
     const authorizationGateway = createOpenFgaAuthorizationGateway(
       config.authorization,
     );
@@ -94,6 +92,7 @@ export async function createRuntimeApp() {
     });
     let googleStorageService: GoogleStorageApplicationService =
       new DisabledGoogleStorageService();
+    let connectStorage: AuthServiceOptions["connectStorage"];
 
     if (config.googleStorage.enabled) {
       const googleStorageRepository = new PostgresGoogleStorageRepository(pool);
@@ -106,13 +105,32 @@ export async function createRuntimeApp() {
       // byte array so runtime configuration is not a second long-lived key
       // buffer, while acknowledging the service must retain one usable copy.
       config.googleStorage.tokenEncryptionKey.fill(0);
-      googleStorageService = new GoogleStorageService({
+      const enabledStorage = new GoogleStorageService({
         repository: googleStorageRepository,
-        oauth: new GoogleWebServerOAuthGateway(config.googleStorage),
+        oauth: new GoogleWebServerOAuthGateway(config.googleOAuthClient, {
+          callbackUrl: config.googleStorage.callbackUrl,
+        }),
         refreshTokens,
         transactionSeconds: config.googleStorage.transactionSeconds,
       });
+      googleStorageService = enabledStorage;
+      connectStorage = (userId, grant) =>
+        enabledStorage.connectFromLogin(userId, grant);
     }
+
+    // One code exchange now establishes both identity and storage. The server
+    // handoff saves encrypted Drive authority before AuthService issues a new
+    // session. An explicitly storage-disabled IAM lab keeps identity-only login.
+    const oidc = await createOpenIdClientGateway(
+      config.googleOAuthClient,
+      config.oidc,
+    );
+    const authService = new AuthService({
+      repository,
+      oidc,
+      lifetimes: config.authLifetimes,
+      ...(connectStorage ? { connectStorage } : {}),
+    });
 
     /**
      * A previous process may have stopped after PostgreSQL stored a mutation or
@@ -136,6 +154,10 @@ export async function createRuntimeApp() {
       auditService,
       googleStorageService,
       workbookSecurityService,
+      workspaceService: new WorkspaceService(
+        workspaceRepository,
+        authorizationService,
+      ),
       config,
     });
 

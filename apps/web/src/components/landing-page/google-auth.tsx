@@ -39,9 +39,9 @@ function GoogleMark(): React.JSX.Element {
 
 /**
  * ZeroDrive explains Google access before leaving the application. ZeroSheet
- * keeps that same interaction but states its two grants accurately: this first
- * redirect authenticates the person, while Drive/Sheets access is requested
- * later and can be disconnected independently.
+ * keeps that explanation, but one Google consent flow now signs the person in
+ * and connects storage. File access still does not grant decryption keys or
+ * ZeroSheet roles; those remain separate security controls behind the simple UX.
  */
 export function GoogleAuth(): React.JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
@@ -56,8 +56,7 @@ export function GoogleAuth(): React.JSX.Element {
     <>
       <Button
         type="button"
-        size="lg"
-        className="w-fit px-8 shadow-md"
+        className="px-8 py-2 h-12 text-base font-medium w-fit shadow-md"
         onClick={() => setIsOpen(true)}
         disabled={isRedirecting}
       >
@@ -69,7 +68,7 @@ export function GoogleAuth(): React.JSX.Element {
         ) : (
           <>
             <GoogleMark />
-            Sign in with Google
+            Continue with Google
           </>
         )}
       </Button>
@@ -77,7 +76,7 @@ export function GoogleAuth(): React.JSX.Element {
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
-            <DialogTitle>Before Google signs you in</DialogTitle>
+            <DialogTitle>Sign in and connect your Google Drive</DialogTitle>
             <DialogDescription>
               Google verifies who you are. ZeroSheet manages its own workspace
               membership, roles, and workbook permissions.
@@ -86,12 +85,14 @@ export function GoogleAuth(): React.JSX.Element {
 
           <div className="space-y-4 text-sm font-light leading-relaxed text-muted-foreground">
             <p>
-              This step requests only OpenID Connect identity information. Your
-              Google password is entered on Google and never reaches ZeroSheet.
+              Continue once to sign in and connect storage with the same Google
+              account. Your Google password is entered on Google and never
+              reaches ZeroSheet.
             </p>
             <p>
-              Google Drive and Sheets access is a separate permission requested
-              after sign-in, only when you choose to connect storage.
+              Allow access to files you create or select with ZeroSheet and its
+              hidden app-data folder for your encrypted key backup. This does
+              not request unrestricted access to every file in your Drive.
             </p>
             <p>
               Protected cells are encrypted in your browser. Recovery phrases,

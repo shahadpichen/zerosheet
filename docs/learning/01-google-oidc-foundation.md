@@ -41,12 +41,14 @@ it does not automatically grant access to an organization or workbook.
 - Relationship roles and workbook permissions in OpenFGA.
 - Runtime contextual decisions in OPA.
 
-The browser never receives Google's client secret, access token, or ID token.
-After the callback, it receives only an HttpOnly ZeroSheet session cookie.
+The login callback never exposes Google's client secret, refresh token, or ID
+token. It sets only an HttpOnly session cookie. When storage is enabled, the
+authenticated browser later obtains a short-lived API token through the BFF's
+protected storage endpoint, not through a URL or persistent browser storage.
 
 ## Local Google Cloud setup
 
-Create a **Web application** OAuth client for authentication and register this
+Create one **Web application** OAuth client for ZeroSheet and register this
 exact redirect URI:
 
 ```text
@@ -56,8 +58,8 @@ http://localhost:3001/auth/callback
 Put its client ID and secret in the ignored `.env` file:
 
 ```dotenv
-GOOGLE_OIDC_CLIENT_ID=...
-GOOGLE_OIDC_CLIENT_SECRET=...
+GOOGLE_OAUTH_CLIENT_ID=...
+GOOGLE_OAUTH_CLIENT_SECRET=...
 GOOGLE_OIDC_HOSTED_DOMAIN=
 ```
 
@@ -65,14 +67,19 @@ Leave the hosted domain empty for consumer and Workspace accounts. If it is
 set, ZeroSheet sends it as an account-selection hint and independently requires
 the matching signed `hd` claim before creating a session.
 
-The separate Drive/Sheets OAuth client still uses:
+On that same client, also register the Drive/Sheets reconnect callback:
 
 ```text
 http://localhost:3001/google/storage/callback
 ```
 
-Do not combine the sign-in and storage clients. Authentication requests only
-`openid email profile`; Drive access is a later, separate consent ceremony.
+With `GOOGLE_STORAGE_OAUTH_ENABLED=true`, login requests `openid email profile`
+and the narrow Drive scopes together, then saves encrypted storage authority
+before issuing the session. A storage-disabled IAM lab requests identity only.
+If your API runs on a different
+port (for example 3101), use that port in **both** registered callbacks. See
+[ADR 0009](../architecture/adr-0009-shared-google-oauth-client.md) for migration
+from the previous two-client configuration.
 
 ## Commands
 

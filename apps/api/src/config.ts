@@ -17,11 +17,23 @@ export interface DatabaseConfig {
   useTls: boolean;
 }
 
+/**
+ * One Google Cloud web client identifies ZeroSheet in both OAuth flows. Keep
+ * its credentials here, not on each flow, so rotating a secret cannot leave
+ * sign-in using an old client while Drive uses the new one. These values are
+ * server-only; neither belongs in a VITE_ variable or a browser response.
+ */
+export interface GoogleOAuthClientConfig {
+  readonly clientId: string;
+  readonly clientSecret: string;
+}
+
+/** Login-specific settings; the shared Google client is injected separately. */
 export interface OidcConfig {
   issuerUrl: URL;
-  clientId: string;
-  clientSecret: string;
   callbackUrl: URL;
+  /** Derived from storage.enabled, not a second independent feature flag. */
+  connectStorageOnLogin: boolean;
   /**
    * When present, this is both an account-chooser hint and a claim ZeroSheet
    * requires in the verified Google ID token. An empty value permits consumer
@@ -57,9 +69,10 @@ export interface AuthCookieConfig {
 }
 
 /**
- * Google storage consent is not identity federation. Keeping a discriminated
- * disabled state lets the IAM lab run without fake OAuth secrets while making
- * every credential mandatory before the storage routes can be enabled.
+ * Storage is an optional capability of the same Google client, not another
+ * client registration. Only enabled storage needs a refresh-token encryption
+ * key; login alone never stores a Google refresh token. Keeping this key here
+ * prevents confusing it with the shared OAuth client secret or workbook keys.
  */
 export type GoogleStorageOAuthConfig =
   | {
@@ -71,8 +84,6 @@ export type GoogleStorageOAuthConfig =
       enabled: true;
       callbackUrl: URL;
       transactionSeconds: number;
-      clientId: string;
-      clientSecret: string;
       tokenEncryptionKey: Uint8Array;
     };
 
@@ -84,6 +95,7 @@ export interface RuntimeConfig {
   apiUrl: URL;
   webUrl: URL;
   database: DatabaseConfig;
+  googleOAuthClient: GoogleOAuthClientConfig;
   oidc: OidcConfig;
   authorization: AuthorizationConfig;
   contextualAuthorization: ContextualAuthorizationConfig;
@@ -338,6 +350,25 @@ export function loadRuntimeConfig(
   environment: NodeJS.ProcessEnv = process.env,
   readSecretFile: SecretFileReader = readUtf8SecretFile,
 ): RuntimeConfig {
+  /**
+   * Fail visibly on the retired configuration rather than silently ignoring an
+   * edited credential. This catches the exact stale-client failure that the
+   * shared configuration fixes. Report variable names only, never their values.
+   */
+  const legacyGoogleCredential = [
+    "GOOGLE_OIDC_CLIENT_ID",
+    "GOOGLE_OIDC_CLIENT_SECRET",
+    "GOOGLE_OIDC_CLIENT_SECRET_FILE",
+    "GOOGLE_STORAGE_OAUTH_CLIENT_ID",
+    "GOOGLE_STORAGE_OAUTH_CLIENT_SECRET",
+    "GOOGLE_STORAGE_OAUTH_CLIENT_SECRET_FILE",
+  ].find((name) => environment[name]?.trim());
+  if (legacyGoogleCredential) {
+    throw new Error(
+      `${legacyGoogleCredential} is retired; remove the old Google client variables and configure GOOGLE_OAUTH_CLIENT_ID with GOOGLE_OAUTH_CLIENT_SECRET or GOOGLE_OAUTH_CLIENT_SECRET_FILE once for both flows`,
+    );
+  }
+
   const nodeEnvironment = environment.NODE_ENV?.trim() || "development";
   const secureCookies = booleanValue(
     environment,
@@ -436,6 +467,14 @@ export function loadRuntimeConfig(
       ),
       useTls: booleanValue(environment, "ZEROSHEET_DB_TLS", false),
     },
+    googleOAuthClient: {
+      clientId: required(environment, "GOOGLE_OAUTH_CLIENT_ID"),
+      clientSecret: requiredSecret(
+        environment,
+        "GOOGLE_OAUTH_CLIENT_SECRET",
+        readSecretFile,
+      ),
+    },
     oidc: {
       /**
        * Google is now ZeroSheet's only human OIDC issuer. Hard-coding the
@@ -443,13 +482,8 @@ export function loadRuntimeConfig(
        * authentication to an attacker-controlled discovery document.
        */
       issuerUrl: new URL("https://accounts.google.com"),
-      clientId: required(environment, "GOOGLE_OIDC_CLIENT_ID"),
-      clientSecret: requiredSecret(
-        environment,
-        "GOOGLE_OIDC_CLIENT_SECRET",
-        readSecretFile,
-      ),
       callbackUrl: childUrl(apiUrl, "auth/callback"),
+      connectStorageOnLogin: googleStorageEnabled,
       hostedDomain: optionalHostedDomain(environment),
     },
     authorization: {
@@ -479,12 +513,6 @@ export function loadRuntimeConfig(
       ? {
           enabled: true,
           ...googleStorageBase,
-          clientId: required(environment, "GOOGLE_STORAGE_OAUTH_CLIENT_ID"),
-          clientSecret: requiredSecret(
-            environment,
-            "GOOGLE_STORAGE_OAUTH_CLIENT_SECRET",
-            readSecretFile,
-          ),
           tokenEncryptionKey: base64UrlKey(
             environment,
             "GOOGLE_STORAGE_TOKEN_ENCRYPTION_KEY",

@@ -1,13 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
-import type { GoogleStorageOAuthConfig } from "../config.js";
+import type {
+  GoogleOAuthClientConfig,
+  GoogleStorageOAuthConfig,
+} from "../config.js";
 import { GoogleWebServerOAuthGateway } from "./google-oauth-gateway.js";
 
+// Credentials are shared with sign-in; storage settings contain no duplicate.
+const googleClient: GoogleOAuthClientConfig = {
+  clientId: "shared-client.apps.googleusercontent.com",
+  clientSecret: "server-only-client-secret",
+};
 const config: Extract<GoogleStorageOAuthConfig, { enabled: true }> = {
   enabled: true,
   callbackUrl: new URL("http://localhost:3001/google/storage/callback"),
   transactionSeconds: 600,
-  clientId: "google-storage-client.apps.googleusercontent.com",
-  clientSecret: "server-only-client-secret",
   tokenEncryptionKey: new Uint8Array(32).fill(17),
 };
 
@@ -18,7 +24,7 @@ const config: Extract<GoogleStorageOAuthConfig, { enabled: true }> = {
  */
 describe("GoogleWebServerOAuthGateway", () => {
   it("creates an offline PKCE grant containing only storage scopes", () => {
-    const gateway = new GoogleWebServerOAuthGateway(config);
+    const gateway = new GoogleWebServerOAuthGateway(googleClient, config);
     const state = "s".repeat(43);
     const challenge = "c".repeat(43);
 
@@ -29,10 +35,12 @@ describe("GoogleWebServerOAuthGateway", () => {
 
     expect(url.origin).toBe("https://accounts.google.com");
     expect(url.pathname).toBe("/o/oauth2/v2/auth");
-    expect(url.searchParams.get("client_id")).toBe(config.clientId);
+    expect(url.searchParams.get("client_id")).toBe(googleClient.clientId);
     expect(url.searchParams.get("redirect_uri")).toBe(config.callbackUrl.href);
     expect(url.searchParams.get("response_type")).toBe("code");
     expect(url.searchParams.get("access_type")).toBe("offline");
+    expect(url.searchParams.get("include_granted_scopes")).toBe("true");
+    expect(url.searchParams.has("client_secret")).toBe(false);
     expect(url.searchParams.get("prompt")).toBe("consent");
     expect(url.searchParams.get("code_challenge")).toBe(challenge);
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
@@ -57,7 +65,7 @@ describe("GoogleWebServerOAuthGateway", () => {
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     );
-    const gateway = new GoogleWebServerOAuthGateway(config, {
+    const gateway = new GoogleWebServerOAuthGateway(googleClient, config, {
       fetch: fetchMock,
     });
 
@@ -85,8 +93,10 @@ describe("GoogleWebServerOAuthGateway", () => {
     expect(request.method).toBe("POST");
     const body = request.body as URLSearchParams;
     expect(body.get("grant_type")).toBe("authorization_code");
+    expect(body.get("client_id")).toBe(googleClient.clientId);
+    expect(body.get("redirect_uri")).toBe(config.callbackUrl.href);
     expect(body.get("code_verifier")).toBe("v".repeat(43));
-    expect(body.get("client_secret")).toBe(config.clientSecret);
+    expect(body.get("client_secret")).toBe(googleClient.clientSecret);
   });
 
   it("maps provider errors and malformed token documents to one safe category", async () => {
@@ -98,12 +108,12 @@ describe("GoogleWebServerOAuthGateway", () => {
       .mockResolvedValue(new Response('{"access_token":7}', { status: 200 }));
 
     await expect(
-      new GoogleWebServerOAuthGateway(config, {
+      new GoogleWebServerOAuthGateway(googleClient, config, {
         fetch: providerErrorFetch,
       }).refreshAccessToken("refresh-token"),
     ).rejects.toMatchObject({ name: "GoogleStorageDependencyError" });
     await expect(
-      new GoogleWebServerOAuthGateway(config, {
+      new GoogleWebServerOAuthGateway(googleClient, config, {
         fetch: malformedFetch,
       }).refreshAccessToken("refresh-token"),
     ).rejects.toMatchObject({ name: "GoogleStorageDependencyError" });
@@ -118,7 +128,7 @@ describe("GoogleWebServerOAuthGateway", () => {
         refresh_token: "durable-refresh-token",
       }),
     );
-    const gateway = new GoogleWebServerOAuthGateway(config, {
+    const gateway = new GoogleWebServerOAuthGateway(googleClient, config, {
       fetch: fetchMock,
     });
 
@@ -139,7 +149,7 @@ describe("GoogleWebServerOAuthGateway", () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(new Response(null, { status: 200 }));
-    const gateway = new GoogleWebServerOAuthGateway(config, {
+    const gateway = new GoogleWebServerOAuthGateway(googleClient, config, {
       fetch: fetchMock,
     });
 

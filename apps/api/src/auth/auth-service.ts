@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { AuthenticatedUser } from "@zerosheet/contracts";
 import type { AuthLifetimeConfig } from "../config.js";
+import { GoogleStorageOnboardingError } from "../google-storage/errors.js";
+import type { GoogleOAuthTokenResult } from "../google-storage/types.js";
 import { createOpaqueToken, hashOpaqueToken } from "./opaque-tokens.js";
 import type {
   AuthApplicationService,
@@ -23,6 +25,11 @@ export interface AuthServiceOptions {
   repository: AuthRepository;
   oidc: OidcGateway;
   lifetimes: AuthLifetimeConfig;
+  /** Server-only bridge: store Drive authority before issuing a login session. */
+  connectStorage?: (
+    userId: string,
+    grant: GoogleOAuthTokenResult,
+  ) => Promise<void>;
 
   // Deterministic clocks and token factories make time and entropy behavior
   // testable without replacing Node.js globals in the production process.
@@ -38,6 +45,7 @@ export class AuthService implements AuthApplicationService {
   private readonly now: () => Date;
   private readonly opaqueToken: () => string;
   private readonly userId: () => string;
+  private readonly connectStorage: AuthServiceOptions["connectStorage"];
 
   public constructor(options: AuthServiceOptions) {
     this.repository = options.repository;
@@ -46,6 +54,7 @@ export class AuthService implements AuthApplicationService {
     this.now = options.now ?? (() => new Date());
     this.opaqueToken = options.opaqueToken ?? createOpaqueToken;
     this.userId = options.userId ?? randomUUID;
+    this.connectStorage = options.connectStorage;
   }
 
   public async beginLogin(): Promise<StartedLogin> {
@@ -98,14 +107,15 @@ export class AuthService implements AuthApplicationService {
       throw new AuthenticationFlowError();
     }
 
-    let identity;
+    let login;
 
     try {
-      identity = await this.oidc.exchangeAuthorizationCode(
+      login = await this.oidc.exchangeAuthorizationCode(
         callbackUrl,
         transaction,
       );
-    } catch {
+    } catch (error) {
+      if (error instanceof GoogleStorageOnboardingError) throw error;
       // Protocol libraries may expose low-level parsing or token errors. Those
       // details remain server-side rather than becoming an oracle for clients.
       throw new AuthenticationFlowError();
@@ -113,10 +123,21 @@ export class AuthService implements AuthApplicationService {
 
     const now = this.now();
     const user = await this.repository.upsertExternalIdentity({
-      ...identity,
+      ...login.identity,
       candidateUserId: this.userId(),
       now,
     });
+
+    if (this.connectStorage) {
+      if (!login.storageGrant) throw new GoogleStorageOnboardingError();
+      try {
+        // Only the validated issuer/subject mapping selects this user ID.
+        // Failure leaves no new session cookie; retry starts a fresh flow.
+        await this.connectStorage(user.id, login.storageGrant);
+      } catch {
+        throw new GoogleStorageOnboardingError();
+      }
+    }
     const sessionToken = this.opaqueToken();
 
     await this.repository.createSession({

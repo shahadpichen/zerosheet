@@ -13,6 +13,10 @@ The product will combine:
 
 ## Current milestone
 
+The signed-in UI now starts with a workbook browser and a dedicated saved editor.
+See [workbook browser setup and current limits](docs/learning/15-workbook-browser.md)
+for recovery setup, Google persistence, folders, testing, and the bounded editor scope.
+
 Milestone 14 adds a bounded TypeScript record SDK, five-minute quickstart,
 encrypted CRM and backend examples, database/provider sharing-drift visibility,
 plain-Node deploy smoke tests, and a hardened single-node alpha stack for the
@@ -85,7 +89,7 @@ Follow
 [`docs/learning/01-google-oidc-foundation.md`](docs/learning/01-google-oidc-foundation.md)
 and
 [`docs/learning/03-direct-google-authentication.md`](docs/learning/03-direct-google-authentication.md)
-to create the dedicated Google sign-in client, understand the direct BFF flow,
+to create the shared Google web client, understand the direct BFF flow,
 and keep identity separate from roles and Drive authorization.
 
 The OpenFGA model and all authorization concepts are explained in
@@ -120,7 +124,7 @@ hierarchy, authenticated per-cell format, benchmark, and important residual
 risks are explained in
 [`docs/learning/10-browser-cryptography-recovery.md`](docs/learning/10-browser-cryptography-recovery.md).
 
-The separate Google storage consent flow, narrow scopes, encrypted refresh-token
+The combined Google onboarding flow, reconnect path, narrow scopes, encrypted refresh-token
 boundary, direct browser adapter, appData backup, and manual Cloud setup are
 explained in
 [`docs/learning/11-google-delegated-storage.md`](docs/learning/11-google-delegated-storage.md).

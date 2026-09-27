@@ -175,7 +175,7 @@ describe("GoogleStorageService", () => {
     ).not.toBe(setup.repository.transaction?.codeVerifier);
   });
 
-  it("stores only an encrypted refresh token after exact scope consent", async () => {
+  it("stores only an encrypted refresh token after required scope consent", async () => {
     const setup = createService();
     await completeConnection(setup);
 
@@ -195,11 +195,35 @@ describe("GoogleStorageService", () => {
     });
   });
 
+  it("accepts combined identity and storage consent from the shared client", async () => {
+    const setup = createService();
+    const combinedScopes = [...requiredScopes, "openid", "email", "profile"];
+    setup.oauth.exchange = {
+      ...setup.oauth.exchange,
+      grantedScopes: combinedScopes,
+    };
+    await completeConnection(setup);
+    await expect(setup.service.status(userId)).resolves.toMatchObject({
+      connected: true,
+      grantedScopes: [...combinedScopes].sort(),
+    });
+    setup.oauth.refreshed = {
+      ...setup.oauth.refreshed,
+      grantedScopes: combinedScopes,
+    };
+    await expect(
+      setup.service.accessToken(userId, true),
+    ).resolves.toMatchObject({
+      accessToken: "refreshed-access-token",
+    });
+  });
+
   it("rejects incomplete consent instead of storing a partial grant", async () => {
     const setup = createService();
     setup.oauth.exchange = {
       ...setup.oauth.exchange,
-      grantedScopes: [requiredScopes[0]],
+      // Even valid identity scopes cannot make up for a missing storage scope.
+      grantedScopes: [requiredScopes[0], "openid", "email", "profile"],
     };
     const started = await setup.service.beginConnection(userId);
     const state = started.authorizationUrl.searchParams.get("state") as string;
@@ -214,6 +238,47 @@ describe("GoogleStorageService", () => {
       }),
     ).rejects.toMatchObject({ name: "GoogleStorageOAuthFlowError" });
     expect(setup.repository.connection).toBeNull();
+  });
+
+  it("connects directly from a verified login without a second OAuth transaction", async () => {
+    const setup = createService();
+    await setup.service.connectFromLogin(userId, setup.oauth.exchange);
+    expect(setup.repository.transaction).toBeUndefined();
+    expect(setup.oauth.exchangedCode).toBeUndefined();
+    expect(setup.repository.connection?.userId).toBe(userId);
+    const envelope = setup.repository.connection
+      ?.encryptedRefreshToken as string;
+    expect(envelope).not.toContain("initial-refresh-token");
+    expect(setup.protector.open(userId, envelope)).toBe(
+      "initial-refresh-token",
+    );
+    await expect(setup.service.status(userId)).resolves.toMatchObject({
+      connected: true,
+    });
+    await expect(
+      setup.service.accessToken(userId, false),
+    ).resolves.toMatchObject({ accessToken: "initial-access-token" });
+  });
+
+  it("preserves the old connection when a new login lacks fresh storage authority", async () => {
+    const setup = createService();
+    await completeConnection(setup);
+    const previous = setup.repository.connection;
+    await expect(
+      setup.service.connectFromLogin(userId, {
+        accessToken: "new-access",
+        expiresInSeconds: 3600,
+        grantedScopes: requiredScopes,
+      }),
+    ).rejects.toMatchObject({ name: "GoogleStorageOnboardingError" });
+    expect(setup.repository.connection).toBe(previous);
+    await expect(
+      setup.service.connectFromLogin(userId, {
+        ...setup.oauth.exchange,
+        grantedScopes: ["openid", "email"],
+      }),
+    ).rejects.toMatchObject({ name: "GoogleStorageOnboardingError" });
+    expect(setup.repository.connection).toBe(previous);
   });
 
   it("caches access tokens and performs an explicit forced refresh after 401", async () => {

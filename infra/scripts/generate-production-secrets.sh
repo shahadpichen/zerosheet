@@ -6,8 +6,8 @@
 # never overwritten, because silently replacing a PostgreSQL/OpenFGA
 # credential would lock running services out of durable state. Generated values
 # are URL-safe where they become part of the OpenFGA PostgreSQL URI. Google
-# client secrets cannot be generated locally; unmistakable disabled sentinels
-# are created so the stack can start with both integrations disabled.
+# client secrets cannot be generated locally; one unmistakable sentinel is
+# created and MUST be replaced before login works. Storage remains optional.
 set -euo pipefail
 
 if [[ $# -ne 1 || "$1" != /* || "$1" == "/" ]]; then
@@ -23,8 +23,7 @@ secret_names=(
   openfga_db_password
   openfga_datastore_uri
   openfga_preshared_key
-  google_oidc_client_secret
-  google_storage_client_secret
+  google_oauth_client_secret
   google_storage_token_key
 )
 
@@ -77,9 +76,7 @@ write_secret openfga_datastore_uri \
   "postgres://openfga_app:${openfga_db_password}@postgres:5432/openfga?sslmode=disable"
 write_secret openfga_preshared_key "$(random_base64url 48)"
 write_secret google_storage_token_key "$(random_base64url 32)"
-write_secret google_oidc_client_secret \
-  "disabled-replace-from-google-cloud-console"
-write_secret google_storage_client_secret \
+write_secret google_oauth_client_secret \
   "disabled-replace-from-google-cloud-console"
 
 # Clear named shell variables that held database credentials. This cannot erase
@@ -91,4 +88,4 @@ zerosheet_audit_db_password=""
 openfga_db_password=""
 
 echo "Created ${#secret_names[@]} secret files in $secret_directory."
-echo "Replace both Google sentinel files only after creating separate OAuth clients."
+echo "Replace google_oauth_client_secret with the one Google web client's secret before starting the API."

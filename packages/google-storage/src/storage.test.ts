@@ -100,6 +100,19 @@ describe("GoogleWorkspaceStorage", () => {
     expect(body.includeValuesInResponse).toBe(false);
   });
 
+  it("clears deleted values rather than sending null cells that Google skips", async () => {
+    const { storage, fetchMock } = storageWithResponses(
+      Response.json({ totalUpdatedCells: 2 }),
+    );
+    await storage.batchWriteValues(spreadsheetId, [
+      { range: "Sheet1!A1:B1", values: [[null, "zs1:encrypted-blank"]] },
+    ]);
+    const body = JSON.parse(
+      jsonRequestBody(fetchMock.mock.calls[0]?.[1] as RequestInit),
+    ) as { data: { values: unknown[][] }[] };
+    expect(body.data[0]?.values).toEqual([["", "zs1:encrypted-blank"]]);
+  });
+
   it("reads formulas and typed values through one batch request", async () => {
     const { storage, fetchMock } = storageWithResponses(
       Response.json({
@@ -144,6 +157,33 @@ describe("GoogleWorkspaceStorage", () => {
       { id: 1938472, title: "Customers", rowCount: 1000, columnCount: 26 },
     ]);
   });
+
+  // Google omits `values` entirely when a requested range is empty. This is
+  // the first response a newly created workbook returns, not a storage outage.
+  it("reads an empty sheet when Google omits the values field", async () => {
+    const { storage } = storageWithResponses(
+      Response.json({
+        valueRanges: [{ range: "Sheet1!A1:Z100", majorDimension: "ROWS" }],
+      }),
+    );
+    await expect(
+      storage.batchReadValues(spreadsheetId, ["Sheet1!A1:Z100"]),
+    ).resolves.toEqual([{ range: "Sheet1!A1:Z100", values: [] }]);
+  });
+
+  // Accepting an omitted field must not make malformed data look like a blank
+  // workbook; doing so could let a later save overwrite unread remote values.
+  it.each([null, {}, "", [null], [[{}]]])(
+    "rejects a malformed values field: %j",
+    async (values) => {
+      const { storage } = storageWithResponses(
+        Response.json({ valueRanges: [{ range: "Sheet1!A1:Z100", values }] }),
+      );
+      await expect(
+        storage.batchReadValues(spreadsheetId, ["Sheet1!A1:Z100"]),
+      ).rejects.toMatchObject({ code: "GOOGLE_INVALID_RESPONSE" });
+    },
+  );
 
   it("creates and removes one exact Google user permission", async () => {
     const { storage, fetchMock } = storageWithResponses(

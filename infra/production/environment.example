@@ -23,12 +23,11 @@ OPENFGA_STORE_NAME=ZeroSheet Production
 OPENFGA_STORE_ID=01H00000000000000000000000
 OPENFGA_AUTHORIZATION_MODEL_ID=01H00000000000000000000001
 
-# Google sign-in and Google storage are separate OAuth clients. Sign-in is
-# required; delegated Drive/Sheets storage remains independently optional.
-GOOGLE_OIDC_CLIENT_ID=replace-with-google-sign-in-client.apps.googleusercontent.com
+# One web client serves login and optional Drive/Sheets access. Its secret is
+# mounted once from google_oauth_client_secret; never place it in this file.
+GOOGLE_OAUTH_CLIENT_ID=replace-with-google-web-client.apps.googleusercontent.com
 GOOGLE_OIDC_HOSTED_DOMAIN=
 GOOGLE_STORAGE_OAUTH_ENABLED=false
-GOOGLE_STORAGE_OAUTH_CLIENT_ID=replace-with-google-storage-client.apps.googleusercontent.com
 
 # Conservative limits fit the application stack close to a 2 GB VPS boundary.
 # That size is suitable for a learning/alpha node, not HA or a traffic SLA.

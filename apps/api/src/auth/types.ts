@@ -1,4 +1,5 @@
 import type { AuthenticatedUser } from "@zerosheet/contracts";
+import type { GoogleOAuthTokenResult } from "../google-storage/types.js";
 
 /**
  * The OIDC gateway returns only claims the product needs. Keeping this narrow
@@ -12,6 +13,16 @@ export interface ExternalIdentityProfile {
   email: string;
   emailVerified: boolean;
   displayName: string;
+}
+
+/**
+ * Only the server-side coordinator sees the delegated grant. Separating it
+ * from identity prevents a token from being spread into a user database row
+ * or a browser session response. It exists only after OIDC validation passes.
+ */
+export interface VerifiedOidcLogin {
+  readonly identity: ExternalIdentityProfile;
+  readonly storageGrant?: GoogleOAuthTokenResult;
 }
 
 export interface PendingOidcAuthorization {
@@ -80,7 +91,7 @@ export interface OidcGateway {
   exchangeAuthorizationCode(
     callbackUrl: URL,
     transaction: StoredLoginTransaction,
-  ): Promise<ExternalIdentityProfile>;
+  ): Promise<VerifiedOidcLogin>;
 }
 
 export interface StartedLogin {

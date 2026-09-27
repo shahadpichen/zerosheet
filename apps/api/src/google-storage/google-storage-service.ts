@@ -5,12 +5,18 @@ import type {
 } from "@zerosheet/contracts";
 import { createOpaqueToken, hashOpaqueToken } from "../auth/opaque-tokens.js";
 import {
+  GOOGLE_STORAGE_SCOPES,
+  hasGoogleStorageScopes,
+  requireGoogleStorageGrant,
+} from "./consent.js";
+import {
   GoogleStorageConnectionRequiredError,
   GoogleStorageDependencyError,
   GoogleStorageNotConfiguredError,
   GoogleStorageOAuthFlowError,
 } from "./errors.js";
 import type {
+  GoogleOAuthTokenResult,
   GoogleRefreshTokenProtector,
   GoogleStorageApplicationService,
   GoogleStorageOAuthGateway,
@@ -18,10 +24,6 @@ import type {
   StartedGoogleStorageConnection,
 } from "./types.js";
 
-const REQUIRED_SCOPES = [
-  "https://www.googleapis.com/auth/drive.file",
-  "https://www.googleapis.com/auth/drive.appdata",
-] as const;
 const ACCESS_TOKEN_REFRESH_BUFFER_MS = 60_000;
 
 export interface GoogleStorageServiceOptions {
@@ -34,9 +36,9 @@ export interface GoogleStorageServiceOptions {
 }
 
 /**
- * Coordinates a second OAuth relationship after human authentication. Google
- * can authorize a different account than the Google sign-in account; that is
- * an explicit storage choice, not an identity-linking operation.
+ * Saves storage authority from combined login, or repairs it via an explicit
+ * reconnect. Reconnect can choose a different storage account; combined login
+ * always uses the account whose ID token was verified in that same exchange.
  */
 export class GoogleStorageService implements GoogleStorageApplicationService {
   readonly #repository: GoogleStorageRepository;
@@ -62,17 +64,17 @@ export class GoogleStorageService implements GoogleStorageApplicationService {
 
   public async status(userId: string): Promise<GoogleStorageConnectionStatus> {
     const connection = await this.#repository.findConnection(userId);
-    if (!connection || !hasRequiredScopes(connection.grantedScopes)) {
+    if (!connection || !hasGoogleStorageScopes(connection.grantedScopes)) {
       return {
         configured: true,
         connected: false,
-        requiredScopes: [...REQUIRED_SCOPES],
+        requiredScopes: [...GOOGLE_STORAGE_SCOPES],
       };
     }
     return {
       configured: true,
       connected: true,
-      requiredScopes: [...REQUIRED_SCOPES],
+      requiredScopes: [...GOOGLE_STORAGE_SCOPES],
       grantedScopes: [...connection.grantedScopes],
       connectedAt: connection.connectedAt.toISOString(),
     };
@@ -133,30 +135,36 @@ export class GoogleStorageService implements GoogleStorageApplicationService {
         code,
         codeVerifier: transaction.codeVerifier,
       });
-      if (
-        !token.refreshToken ||
-        !token.grantedScopes ||
-        !hasRequiredScopes(token.grantedScopes)
-      ) {
-        throw new GoogleStorageOAuthFlowError();
-      }
-
-      const now = this.#now();
-      await this.#repository.saveConnection({
-        userId: input.userId,
-        encryptedRefreshToken: this.#refreshTokens.seal(
-          input.userId,
-          token.refreshToken,
-        ),
-        grantedScopes: canonicalScopes(token.grantedScopes),
-        connectedAt: now,
-        updatedAt: now,
-      });
-      this.#accessTokens.set(input.userId, tokenResponse(token, now));
+      await this.connectFromLogin(input.userId, token);
     } catch (error) {
       if (error instanceof GoogleStorageOAuthFlowError) throw error;
       throw new GoogleStorageOAuthFlowError();
     }
+  }
+
+  /**
+   * Internal-only handoff from the verified login, or from a validated reconnect
+   * transaction above. No HTTP route accepts this token object from the browser.
+   * Reuse the same encryption/storage path so onboarding cannot accidentally
+   * persist a plaintext refresh token while reconnect remains encrypted.
+   */
+  public async connectFromLogin(
+    userId: string,
+    token: GoogleOAuthTokenResult,
+  ): Promise<void> {
+    requireGoogleStorageGrant(token);
+    const now = this.#now();
+    await this.#repository.saveConnection({
+      userId,
+      encryptedRefreshToken: this.#refreshTokens.seal(
+        userId,
+        token.refreshToken,
+      ),
+      grantedScopes: canonicalScopes(token.grantedScopes),
+      connectedAt: now,
+      updatedAt: now,
+    });
+    this.#accessTokens.set(userId, tokenResponse(token, now));
   }
 
   public async accessToken(
@@ -199,6 +207,8 @@ export class GoogleStorageService implements GoogleStorageApplicationService {
         userId,
         connection.encryptedRefreshToken,
       );
+      // Google revokes project-wide grants, including earlier identity consent.
+      // This does not end the local ZeroSheet session or delete its identity.
       await this.#oauth.revoke(refreshToken);
     } catch {
       // Revocation is best effort after local deletion. The user can also
@@ -210,7 +220,7 @@ export class GoogleStorageService implements GoogleStorageApplicationService {
     userId: string,
   ): Promise<GoogleStorageAccessTokenResponse> {
     const connection = await this.#repository.findConnection(userId);
-    if (!connection || !hasRequiredScopes(connection.grantedScopes)) {
+    if (!connection || !hasGoogleStorageScopes(connection.grantedScopes)) {
       throw new GoogleStorageConnectionRequiredError();
     }
 
@@ -227,7 +237,7 @@ export class GoogleStorageService implements GoogleStorageApplicationService {
     }
 
     const scopes = token.grantedScopes ?? connection.grantedScopes;
-    if (!hasRequiredScopes(scopes)) {
+    if (!hasGoogleStorageScopes(scopes)) {
       throw new GoogleStorageConnectionRequiredError();
     }
     const now = this.#now();
@@ -266,7 +276,7 @@ export class DisabledGoogleStorageService implements GoogleStorageApplicationSer
     return Promise.resolve({
       configured: false,
       connected: false,
-      requiredScopes: [...REQUIRED_SCOPES],
+      requiredScopes: [...GOOGLE_STORAGE_SCOPES],
     });
   }
 
@@ -301,9 +311,4 @@ function tokenResponse(
 
 function canonicalScopes(scopes: readonly string[]): string[] {
   return [...new Set(scopes)].sort();
-}
-
-function hasRequiredScopes(scopes: readonly string[]): boolean {
-  const granted = new Set(scopes);
-  return REQUIRED_SCOPES.every((scope) => granted.has(scope));
 }

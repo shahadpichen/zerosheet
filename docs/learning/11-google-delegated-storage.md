@@ -3,23 +3,25 @@
 ## What this milestone teaches
 
 ZeroSheet now has a Google storage boundary without confusing storage consent
-with login. There are two deliberately separate Google relationships:
+with identity verification. One Google web client supports combined onboarding
+and an exceptional reconnect path:
 
 ```text
-Sign-in
-Browser -> Google identity scopes -> ZeroSheet callback -> ZeroSheet session
+Combined onboarding
+Browser -> Google identity + storage consent -> /auth/callback
+       -> verify identity -> save encrypted refresh token -> ZeroSheet session
 
-Storage
+Reconnect (existing session only)
 Authenticated browser -> ZeroSheet BFF -> Google Drive/Sheets consent
 Browser <- short-lived access token <- ZeroSheet BFF
 Browser -> fixed Google Drive/Sheets APIs with encrypted protected cells
 ```
 
-In the first flow, Google is ZeroSheet's direct OIDC issuer. In the second
-flow, ZeroSheet is Google's OAuth
-client and the grant authorizes API operations. A Google account chosen for
-storage may even differ from the account used to sign in; that changes storage
-authority, not the ZeroSheet product-user identity.
+Combined onboarding uses the same verified Google account for identity and
+storage. An explicit reconnect can choose a different storage account, but
+cannot change the ZeroSheet product identity. See
+[ADR 0010](../architecture/adr-0010-combined-google-onboarding.md) for the exact
+callback ordering, failure handling and fresh-token consent tradeoff.
 
 ## Why an OAuth web-server flow is still needed
 
@@ -27,13 +29,16 @@ Google access tokens expire quickly. Requesting `access_type=offline` lets the
 authorization-code exchange return a refresh token that can obtain future
 access tokens without asking the user to consent on every page load.
 
-The flow is:
+The normal login saves its grant directly through the server-only storage
+handoff before issuing the session. It needs no second browser redirect. The
+repair/reconnect flow is:
 
 1. The signed-in browser opens `/google/storage/connect`.
 2. The BFF creates random `state`, a PKCE verifier/challenge, and a separate
    opaque HttpOnly transaction selector.
 3. PostgreSQL stores the selector digest, user ID, state, verifier, and expiry.
-4. Google shows consent for exactly the two storage scopes.
+4. Google requests consent for the two storage scopes, potentially alongside
+   previously granted identity scopes through incremental authorization.
 5. Google returns an authorization code and state to the fixed BFF callback.
 6. The BFF requires the same product session, consumes the one-use transaction,
    validates state, and exchanges the code using the PKCE verifier and
@@ -61,20 +66,30 @@ hidden `appDataFolder`. ZeroSheet uses it for the Capsule-encrypted private-key
 backup. The folder being hidden is convenience, not confidentiality: the
 backup remains safe because the 12-word phrase is required to open it.
 
-The adapter does not request broad `drive`, identity (`openid`, `email`,
-`profile`), Gmail, directory, or administrator scopes.
+The storage adapter does not explicitly request broad `drive`, identity
+(`openid`, `email`, `profile`), Gmail, directory, or administrator scopes.
+Because incremental authorization includes earlier grants, the returned token
+may also carry identity scopes. The service checks that both storage scopes
+exist rather than rejecting a valid combined grant. Use a dedicated ZeroSheet
+Google Cloud project without unrelated broad grants.
+
+Disconnect removes the local stored connection and attempts Google revocation.
+Google revokes grants at the project level, so this can also revoke identity
+consent. It does not delete the ZeroSheet account or end the local session;
+Google may ask for consent at the next login. Separate clients inside the same
+project would not isolate this revocation behavior.
 
 ## Where each credential lives
 
-| Value                        | Location                                                | Lifetime and meaning                                                             |
-| ---------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| ZeroSheet session selector   | HttpOnly browser cookie; digest in PostgreSQL           | Identifies the signed-in ZeroSheet session.                                      |
-| Google client secret         | BFF deployment secret                                   | Authenticates the confidential OAuth client; never sent to browser code.         |
-| Google refresh token         | AES-256-GCM envelope in PostgreSQL                      | Durable authority to request short access tokens.                                |
-| Refresh-token encryption key | deployment secret outside PostgreSQL                    | Independent 32-byte key; not a recovery phrase or workbook key.                  |
-| Google access token          | BFF memory and browser module memory                    | Short-lived authority for the two consented scopes; never local/session storage. |
-| Recovery phrase              | user memory/offline record and temporary browser memory | Opens the encrypted HPKE private-key backup; Google and BFF never receive it.    |
-| Workbook key                 | authorized browser memory; remote HPKE envelopes only   | Decrypts protected cells; unrelated to every OAuth credential above.             |
+| Value                        | Location                                                | Lifetime and meaning                                                                              |
+| ---------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| ZeroSheet session selector   | HttpOnly browser cookie; digest in PostgreSQL           | Identifies the signed-in ZeroSheet session.                                                       |
+| Google client secret         | One shared BFF deployment secret                        | Authenticates the same client for login and storage; never sent to browser code.                  |
+| Google refresh token         | AES-256-GCM envelope in PostgreSQL                      | Durable authority to request short access tokens.                                                 |
+| Refresh-token encryption key | deployment secret outside PostgreSQL                    | Independent 32-byte key; not a recovery phrase or workbook key.                                   |
+| Google access token          | BFF memory and browser module memory                    | Short-lived authority for granted scopes, including earlier consent; never local/session storage. |
+| Recovery phrase              | user memory/offline record and temporary browser memory | Opens the encrypted HPKE private-key backup; Google and BFF never receive it.                     |
+| Workbook key                 | authorized browser memory; remote HPKE envelopes only   | Decrypts protected cells; unrelated to every OAuth credential above.                              |
 
 Encrypting a refresh token is not magic protection from the running service.
 A database thief without the deployment key gets ciphertext. A live malicious
@@ -125,21 +140,28 @@ Interactive Google testing requires manual project-owner configuration:
 2. Enable **Google Drive API** and **Google Sheets API**.
 3. Configure the Google Auth Platform branding/audience and add development
    test users when the app is in testing mode.
-4. Create a **Web application** OAuth client dedicated to ZeroSheet storage.
-   Do not reuse the Google sign-in client.
-5. Add this exact local authorized redirect URI:
+4. Use the same **Web application** OAuth client as ZeroSheet sign-in. One
+   client handles both Drive and Sheets APIs too.
+5. Register both exact local authorized redirect URIs on that client:
 
    ```text
+   http://localhost:3001/auth/callback
    http://localhost:3001/google/storage/callback
    ```
 
-6. Put its client ID and secret in the ignored `.env`, generate a random
-   32-byte base64url token-encryption key, and set
-   `GOOGLE_STORAGE_OAUTH_ENABLED=true`.
-7. Apply migrations, start the API/web app, sign in, and choose **Connect Google
-   Drive**.
+   If the API runs on another port, replace 3001 in both URLs with that port.
 
-Production uses the exact public HTTPS API callback and keeps the client secret
+6. Set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` once in the
+   ignored `.env`. Generate a random 32-byte base64url token-encryption key
+   (`GOOGLE_STORAGE_TOKEN_ENCRYPTION_KEY`), and set
+   `GOOGLE_STORAGE_OAUTH_ENABLED=true`.
+7. Apply migrations, start the API/web app, and choose **Continue with Google**.
+   Allow identity and storage permissions together. The first authenticated
+   page opens directly without a separate Drive panel or second connect step.
+   For diagnostics, the authenticated `/google/storage/status` endpoint reports
+   the stored grant. The [workbook UI](15-workbook-browser.md) opens saved files.
+
+Production registers both exact public HTTPS API callbacks and keeps the client secret
 and token-encryption key in separately backed-up secret files. Losing the token
 key makes stored refresh-token envelopes unusable; leaking it together with the
 database exposes the Google storage grants.

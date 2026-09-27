@@ -1,6 +1,8 @@
 import type { AuthenticatedUser } from "@zerosheet/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AuthService, AuthenticationFlowError } from "./auth-service.js";
+import type { AuthServiceOptions } from "./auth-service.js";
+import { GoogleStorageOnboardingError } from "../google-storage/errors.js";
 import { hashOpaqueToken } from "./opaque-tokens.js";
 import type {
   AuthRepository,
@@ -9,6 +11,7 @@ import type {
   SaveLoginTransactionInput,
   StoredLoginTransaction,
   UpsertExternalIdentityInput,
+  VerifiedOidcLogin,
 } from "./types.js";
 
 const now = new Date("2026-09-02T10:00:00.000Z");
@@ -53,7 +56,9 @@ class RecordingRepository implements AuthRepository {
   ): Promise<StoredLoginTransaction | null> {
     this.consumedSelectorHash = selectorHash;
     this.consumedState = state;
-    return Promise.resolve(this.transaction);
+    const transaction = this.transaction;
+    this.transaction = null;
+    return Promise.resolve(transaction?.state === state ? transaction : null);
   }
 
   public upsertExternalIdentity(
@@ -80,6 +85,15 @@ class RecordingRepository implements AuthRepository {
 
 class RecordingOidcGateway implements OidcGateway {
   public exchangedTransaction: StoredLoginTransaction | undefined;
+  public login: VerifiedOidcLogin = {
+    identity: {
+      issuer: "https://accounts.google.com",
+      subject: "google-subject",
+      email: user.email,
+      emailVerified: true,
+      displayName: user.displayName,
+    },
+  };
 
   public createAuthorizationRequest() {
     return Promise.resolve({
@@ -95,17 +109,11 @@ class RecordingOidcGateway implements OidcGateway {
     transaction: StoredLoginTransaction,
   ) {
     this.exchangedTransaction = transaction;
-    return Promise.resolve({
-      issuer: "https://accounts.google.com",
-      subject: "google-subject",
-      email: user.email,
-      emailVerified: true,
-      displayName: user.displayName,
-    });
+    return Promise.resolve(this.login);
   }
 }
 
-function serviceFixture() {
+function serviceFixture(connectStorage?: AuthServiceOptions["connectStorage"]) {
   const repository = new RecordingRepository();
   const oidc = new RecordingOidcGateway();
   const tokens = ["raw-transaction-token", "raw-session-token"];
@@ -116,6 +124,7 @@ function serviceFixture() {
     now: () => now,
     opaqueToken: () => tokens.shift() ?? "unexpected-extra-token",
     userId: () => user.id,
+    ...(connectStorage ? { connectStorage } : {}),
   });
 
   return { service, repository, oidc };
@@ -154,7 +163,12 @@ describe("AuthService", () => {
       hashOpaqueToken("raw-transaction-token"),
     );
     expect(repository.consumedState).toBe("oidc-state");
-    expect(oidc.exchangedTransaction).toEqual(repository.transaction);
+    expect(oidc.exchangedTransaction).toMatchObject({
+      state: "oidc-state",
+      nonce: "oidc-nonce",
+      codeVerifier: "pkce-verifier",
+    });
+    expect(repository.transaction).toBeNull();
     expect(repository.identity).toMatchObject({
       issuer: "https://accounts.google.com",
       subject: "google-subject",
@@ -193,5 +207,99 @@ describe("AuthService", () => {
     expect(repository.deletedSessionHash).toBe(
       hashOpaqueToken("raw-session-token"),
     );
+  });
+
+  it("connects verified storage before issuing a session, without leaking tokens", async () => {
+    const connect = vi.fn<NonNullable<AuthServiceOptions["connectStorage"]>>();
+    const { service, repository, oidc } = serviceFixture(connect);
+    const grant = {
+      accessToken: "private-access-token",
+      refreshToken: "private-refresh-token",
+      expiresInSeconds: 3600,
+    };
+    oidc.login = { ...oidc.login, storageGrant: grant };
+    connect.mockImplementation((actingUserId, receivedGrant) => {
+      expect(actingUserId).toBe(user.id);
+      expect(receivedGrant).toBe(grant);
+      expect(repository.session).toBeUndefined();
+      return Promise.resolve();
+    });
+    await service.beginLogin();
+    const callback = new URL(
+      "http://localhost:3001/auth/callback?code=code&state=oidc-state",
+    );
+    const completed = await service.completeLogin(
+      callback,
+      "raw-transaction-token",
+    );
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(repository.session?.userId).toBe(user.id);
+    expect(JSON.stringify(repository.identity)).not.toContain("token");
+    expect(JSON.stringify(completed)).not.toContain("private-");
+    await expect(
+      service.completeLogin(callback, "raw-transaction-token"),
+    ).rejects.toBeInstanceOf(AuthenticationFlowError);
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not issue a session when the combined grant is missing", async () => {
+    const connect = vi.fn<NonNullable<AuthServiceOptions["connectStorage"]>>();
+    const { service, repository } = serviceFixture(connect);
+    await service.beginLogin();
+    await expect(
+      service.completeLogin(
+        new URL(
+          "http://localhost:3001/auth/callback?code=code&state=oidc-state",
+        ),
+        "raw-transaction-token",
+      ),
+    ).rejects.toBeInstanceOf(GoogleStorageOnboardingError);
+    expect(connect).not.toHaveBeenCalled();
+    expect(repository.session).toBeUndefined();
+  });
+
+  it("does not issue a session or expose provider details when storage persistence fails", async () => {
+    const connect = vi
+      .fn<NonNullable<AuthServiceOptions["connectStorage"]>>()
+      .mockRejectedValue(new Error("sensitive-token-details"));
+    const { service, repository, oidc } = serviceFixture(connect);
+    oidc.login = {
+      ...oidc.login,
+      storageGrant: {
+        accessToken: "private-access",
+        refreshToken: "private-refresh",
+        expiresInSeconds: 3600,
+      },
+    };
+    await service.beginLogin();
+    await expect(
+      service.completeLogin(
+        new URL(
+          "http://localhost:3001/auth/callback?code=code&state=oidc-state",
+        ),
+        "raw-transaction-token",
+      ),
+    ).rejects.toEqual(new GoogleStorageOnboardingError());
+    expect(repository.session).toBeUndefined();
+  });
+
+  it("does not connect storage when OIDC identity validation fails", async () => {
+    const connect = vi.fn<NonNullable<AuthServiceOptions["connectStorage"]>>();
+    const { service, repository, oidc } = serviceFixture(connect);
+    vi.spyOn(oidc, "exchangeAuthorizationCode").mockRejectedValue(
+      new Error("invalid token"),
+    );
+    await service.beginLogin();
+    await expect(
+      service.completeLogin(
+        new URL(
+          "http://localhost:3001/auth/callback?code=code&state=oidc-state",
+        ),
+        "raw-transaction-token",
+      ),
+    ).rejects.toBeInstanceOf(AuthenticationFlowError);
+    expect(connect).not.toHaveBeenCalled();
+    expect(repository.identity).toBeUndefined();
+    expect(repository.session).toBeUndefined();
   });
 });

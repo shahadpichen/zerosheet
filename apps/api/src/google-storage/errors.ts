@@ -29,3 +29,13 @@ export class GoogleStorageDependencyError extends Error {
     this.name = "GoogleStorageDependencyError";
   }
 }
+
+/** A safe recovery category for combined login; no provider details escape. */
+export class GoogleStorageOnboardingError extends Error {
+  public constructor() {
+    super(
+      "Google Drive setup could not finish. Try again and allow the requested permissions.",
+    );
+    this.name = "GoogleStorageOnboardingError";
+  }
+}

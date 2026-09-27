@@ -1,7 +1,11 @@
 import * as client from "openid-client";
-import type { OidcConfig } from "../config.js";
+import type { GoogleOAuthClientConfig, OidcConfig } from "../config.js";
+import {
+  GOOGLE_STORAGE_SCOPES,
+  requireGoogleStorageGrant,
+} from "../google-storage/consent.js";
 import type {
-  ExternalIdentityProfile,
+  VerifiedOidcLogin,
   OidcGateway,
   PendingOidcAuthorization,
   StoredLoginTransaction,
@@ -15,12 +19,13 @@ import type {
  * harder to audit and easier to get subtly wrong.
  */
 export async function createOpenIdClientGateway(
+  googleClient: GoogleOAuthClientConfig,
   settings: OidcConfig,
 ): Promise<OidcGateway> {
   const configuration = await client.discovery(
     settings.issuerUrl,
-    settings.clientId,
-    settings.clientSecret,
+    googleClient.clientId,
+    googleClient.clientSecret,
   );
 
   return new OpenIdClientGateway(configuration, settings);
@@ -41,7 +46,7 @@ class OpenIdClientGateway implements OidcGateway {
     const authorizationParameters: Record<string, string> = {
       response_type: "code",
       redirect_uri: this.settings.callbackUrl.href,
-      scope: "openid email profile",
+      scope: this.requestedScopes().join(" "),
       state,
       nonce,
       code_challenge: codeChallenge,
@@ -53,6 +58,16 @@ class OpenIdClientGateway implements OidcGateway {
        */
       prompt: "select_account",
     };
+
+    if (this.settings.connectStorageOnLogin) {
+      // One Google visit establishes identity and durable storage authority.
+      // Explicit consent requests a fresh refresh token even for an existing
+      // Google grant. This deliberately shows consent on login; it avoids
+      // reusing an old token tied to another account/client after migration.
+      authorizationParameters.access_type = "offline";
+      authorizationParameters.include_granted_scopes = "true";
+      authorizationParameters.prompt = "select_account consent";
+    }
 
     /**
      * Google's `hd` request parameter narrows the account chooser, but request
@@ -79,7 +94,7 @@ class OpenIdClientGateway implements OidcGateway {
   public async exchangeAuthorizationCode(
     callbackUrl: URL,
     transaction: StoredLoginTransaction,
-  ): Promise<ExternalIdentityProfile> {
+  ): Promise<VerifiedOidcLogin> {
     const tokens = await client.authorizationCodeGrant(
       this.configuration,
       callbackUrl,
@@ -118,13 +133,40 @@ class OpenIdClientGateway implements OidcGateway {
 
     const displayName = this.displayName(claims, claims.email);
 
-    return {
+    const identity = {
       issuer: this.configuration.serverMetadata().issuer,
       subject: claims.sub,
       email: claims.email,
       emailVerified: true,
       displayName,
     };
+
+    if (!this.settings.connectStorageOnLogin) return { identity };
+
+    // These tokens and the ID token came from the SAME code exchange. Only
+    // project the storage grant after verifying the identity and hosted domain.
+    // OAuth allows scope omission when unchanged; an explicit list always wins
+    // so a user declining one permission cannot be treated as fully connected.
+    const storageGrant = {
+      accessToken: tokens.access_token,
+      expiresInSeconds: tokens.expires_in ?? 0,
+      ...(tokens.refresh_token ? { refreshToken: tokens.refresh_token } : {}),
+      grantedScopes:
+        tokens.scope === undefined
+          ? this.requestedScopes()
+          : tokens.scope.split(/\s+/u).filter(Boolean),
+    };
+    requireGoogleStorageGrant(storageGrant);
+    return { identity, storageGrant };
+  }
+
+  private requestedScopes(): string[] {
+    return [
+      "openid",
+      "email",
+      "profile",
+      ...(this.settings.connectStorageOnLogin ? GOOGLE_STORAGE_SCOPES : []),
+    ];
   }
 
   private displayName(

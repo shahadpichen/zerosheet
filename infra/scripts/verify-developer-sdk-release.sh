@@ -48,7 +48,7 @@ docker compose \
   --profile bootstrap \
   --profile operations \
   config --quiet
-if rg -n '^[[:space:]]+(GOOGLE_OIDC_CLIENT_SECRET|OPENFGA_AUTHN_PRESHARED_KEYS|ZEROSHEET_DB_PASSWORD):' infra/production/compose.yaml; then
+if rg -n '^[[:space:]]+(GOOGLE_OAUTH_CLIENT_SECRET|OPENFGA_AUTHN_PRESHARED_KEYS|ZEROSHEET_DB_PASSWORD):' infra/production/compose.yaml; then
   echo "A direct production secret variable replaced a mounted *_FILE boundary." >&2
   exit 1
 fi

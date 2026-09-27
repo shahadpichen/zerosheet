@@ -240,7 +240,13 @@ export class GoogleWorkspaceStorage {
       body: JSON.stringify({
         valueInputOption: "RAW",
         includeValuesInResponse: false,
-        data: ranges,
+        // Google's values API skips null entries; an empty string actually
+        // clears a cell. Our storage port treats null as a deliberate blank,
+        // including when a user deletes previously encrypted content.
+        data: ranges.map((range) => ({
+          ...range,
+          values: range.values.map((row) => row.map((value) => value ?? "")),
+        })),
       }),
     });
     const value = await readBoundedJson(response);
@@ -587,11 +593,14 @@ function parseReadRanges(value: unknown): GoogleReadRange[] {
     if (
       !isRecord(entry) ||
       typeof entry.range !== "string" ||
-      !Array.isArray(entry.values)
+      (entry.values !== undefined && !Array.isArray(entry.values))
     ) {
       throw new GoogleStorageError("GOOGLE_INVALID_RESPONSE");
     }
-    const values = entry.values.map((row) => {
+    // Sheets leaves out `values` for a completely empty range, including every
+    // new workbook. Normalize only that documented omission to an empty array;
+    // null or malformed data must still fail closed rather than hide content.
+    const values = (entry.values ?? []).map((row) => {
       if (!Array.isArray(row)) {
         throw new GoogleStorageError("GOOGLE_INVALID_RESPONSE");
       }

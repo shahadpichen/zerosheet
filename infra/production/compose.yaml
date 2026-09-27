@@ -179,9 +179,9 @@ services:
       ZEROSHEET_DB_PASSWORD_FILE: /run/secrets/zerosheet_db_password
       ZEROSHEET_DB_TLS: "false"
       # The server-side BFF, never browser JavaScript, exchanges Google's code.
-      # Identity scopes remain separate from the Drive/Sheets OAuth client.
-      GOOGLE_OIDC_CLIENT_ID: ${GOOGLE_OIDC_CLIENT_ID:?GOOGLE_OIDC_CLIENT_ID is required}
-      GOOGLE_OIDC_CLIENT_SECRET_FILE: /run/secrets/google_oidc_client_secret
+      # One client and mounted secret serve combined login and Drive consent.
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:?GOOGLE_OAUTH_CLIENT_ID is required}
+      GOOGLE_OAUTH_CLIENT_SECRET_FILE: /run/secrets/google_oauth_client_secret
       GOOGLE_OIDC_HOSTED_DOMAIN: ${GOOGLE_OIDC_HOSTED_DOMAIN:-}
       OPENFGA_API_URL: http://127.0.0.1:8080
       OPENFGA_STORE_ID: ${OPENFGA_STORE_ID:?Run the OpenFGA bootstrap and set OPENFGA_STORE_ID}
@@ -189,14 +189,11 @@ services:
       OPENFGA_PRESHARED_KEY_FILE: /run/secrets/openfga_preshared_key
       OPA_API_URL: http://127.0.0.1:8181
       GOOGLE_STORAGE_OAUTH_ENABLED: ${GOOGLE_STORAGE_OAUTH_ENABLED:-false}
-      GOOGLE_STORAGE_OAUTH_CLIENT_ID: ${GOOGLE_STORAGE_OAUTH_CLIENT_ID:?GOOGLE_STORAGE_OAUTH_CLIENT_ID is required}
-      GOOGLE_STORAGE_OAUTH_CLIENT_SECRET_FILE: /run/secrets/google_storage_client_secret
       GOOGLE_STORAGE_TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/google_storage_token_key
     secrets:
       - zerosheet_db_password
-      - google_oidc_client_secret
+      - google_oauth_client_secret
       - openfga_preshared_key
-      - google_storage_client_secret
       - google_storage_token_key
     depends_on:
       policy-namespace:
@@ -306,10 +303,8 @@ secrets:
     file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/openfga_datastore_uri
   openfga_preshared_key:
     file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/openfga_preshared_key
-  google_oidc_client_secret:
-    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/google_oidc_client_secret
-  google_storage_client_secret:
-    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/google_storage_client_secret
+  google_oauth_client_secret:
+    file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/google_oauth_client_secret
   google_storage_token_key:
     file: ${ZEROSHEET_SECRET_DIRECTORY:?ZEROSHEET_SECRET_DIRECTORY is required}/google_storage_token_key
 

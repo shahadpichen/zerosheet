@@ -110,8 +110,7 @@
     min-height: 460px;
     overflow: hidden;
     border: 1px solid hsl(var(--border));
-    background: #fff;
-    color-scheme: light;
+    background: hsl(var(--background));
   }
 }
 

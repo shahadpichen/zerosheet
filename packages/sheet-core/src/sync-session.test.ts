@@ -115,6 +115,18 @@ describe("EncryptedSheetSyncSession", () => {
     });
   });
 
+  it("opens an entirely empty range as blank cells without writing to Google", async () => {
+    const storage = new FakeSheetStorage();
+    storage.values = [{ range: "'Sheet1'!A1:B2", values: [] }];
+    await expect(createSession(storage).load(range)).resolves.toMatchObject({
+      cells: [
+        [{ value: null }, { value: null }],
+        [{ value: null }, { value: null }],
+      ],
+    });
+    expect(storage.writes).toHaveLength(0);
+  });
+
   it("detects an external edit before writing", async () => {
     const storage = new FakeSheetStorage();
     const session = createSession(storage);

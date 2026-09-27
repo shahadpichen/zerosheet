@@ -341,7 +341,7 @@ export const WorkbookSharingAuditExpectationResponseSchema = z.object({
 
 /**
  * Google storage status never returns a Google account token or provider user
- * profile. The browser only needs to know whether the independent Drive grant
+ * profile. The browser only needs to know whether a stored Drive connection
  * exists and whether its required narrow scopes are still recorded.
  */
 export const GoogleStorageConnectionStatusSchema = z.discriminatedUnion(
@@ -356,7 +356,20 @@ export const GoogleStorageConnectionStatusSchema = z.discriminatedUnion(
       configured: z.literal(true),
       connected: z.literal(true),
       requiredScopes: z.array(z.string().url()).length(2),
-      grantedScopes: z.array(z.string().url()).min(2).max(16),
+      // OAuth scopes are space-delimited tokens, not necessarily URLs. Combined
+      // sign-in also grants `openid` (and may return `email` or `profile`). Keep
+      // the OAuth ASCII token grammar and bounds without rejecting valid login
+      // scopes; the storage service separately requires both Drive permissions.
+      grantedScopes: z
+        .array(
+          z
+            .string()
+            .min(1)
+            .max(2_048)
+            .regex(/^[\x21\x23-\x5B\x5D-\x7E]+$/u),
+        )
+        .min(2)
+        .max(16),
       connectedAt: z.string().datetime(),
     }),
   ],
@@ -463,3 +476,4 @@ export type GoogleStorageAccessTokenResponse = z.infer<
 export type GoogleStorageErrorResponse = z.infer<
   typeof GoogleStorageErrorResponseSchema
 >;
+export * from "./workspace.js";

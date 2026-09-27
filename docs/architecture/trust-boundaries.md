@@ -24,11 +24,12 @@ Browser
 4. Google Drive permission, ZeroSheet permission, and possession of a decryption-key envelope are separate controls.
 5. Passwords, OAuth tokens, private keys, recovery phrases, and plaintext protected cells must never enter logs.
 6. Missing or unavailable authorization data results in denial.
-7. Google tokens and the OIDC client secret remain behind the BFF boundary;
-   browser JavaScript receives only a narrow product-user projection.
+7. Google login tokens and the shared client secret remain behind the BFF;
+   login exposes only a narrow product-user projection. Storage intentionally
+   exposes a short-lived API token under the controls in rule 39.
 8. External identities are keyed by the OIDC `(issuer, subject)` pair. Email alone never links accounts.
-9. Upstream Google login and Google Drive API authorization are separate grants;
-   sign-in does not grant storage access.
+9. Combined onboarding requests identity and storage consent together. Identity
+   claims still cannot substitute for missing file permissions or encryption keys.
 10. The Google route is fixed; no request parameter chooses an identity issuer.
     State, nonce, PKCE, signed-claim validation, and product authorization all
     remain mandatory.
@@ -92,9 +93,10 @@ Browser
 37. Cell authentication prevents cross-location swapping but does not prevent
     same-coordinate rollback. Production freshness needs an authenticated
     workbook revision or manifest in a later format.
-38. Google sign-in and Google storage use separate OAuth clients, transactions,
-    scopes, tokens, and revocation lifecycles. Neither grant substitutes for
-    the other.
+38. Google sign-in establishes identity and storage with one code exchange;
+    reconnect keeps a session-bound transaction and callback. Google may combine consented
+    scopes and revoke project-wide grants together. Storage tokens never
+    substitute for validated login or application authorization.
 39. The BFF stores only an AES-256-GCM-encrypted Google refresh token and gives
     an authenticated exact-origin browser only a short-lived access token. The
     browser retains it in memory and sends it only to fixed Google API origins.

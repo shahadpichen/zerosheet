@@ -1,5 +1,5 @@
 import type { AuthenticatedUser } from "@zerosheet/contracts";
-import { LogOut, Sheet, UserRound } from "lucide-react";
+import { LogOut, UserRound } from "lucide-react";
 import { ModeToggle } from "./mode-toggle.js";
 import { Avatar, AvatarFallback } from "./ui/avatar.js";
 import { Button } from "./ui/button.js";
@@ -11,6 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu.js";
+import { WorkspaceLink } from "./workspace-link.js";
 
 function initials(user: AuthenticatedUser): string {
   const parts = user.displayName.trim().split(/\s+/u).filter(Boolean);
@@ -27,27 +28,34 @@ function initials(user: AuthenticatedUser): string {
  */
 export function AppHeader({
   user,
+  navigate,
 }: {
   // App always passes this property. Explicit `undefined` works with the
   // repository's exactOptionalPropertyTypes rule and means "no active user".
   user: AuthenticatedUser | undefined;
+  navigate?: (path: string) => void;
 }): React.JSX.Element {
   return (
-    <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-      <div className="mx-auto flex h-16 max-w-[1480px] items-center justify-between px-4 sm:px-6 lg:px-8">
-        <a
-          href="/"
-          className="flex items-center gap-2 text-foreground no-underline"
-          aria-label="ZeroSheet home"
-        >
-          <span className="flex h-9 w-9 items-center justify-center border bg-foreground text-background">
-            <Sheet className="h-4 w-4" aria-hidden="true" />
-          </span>
-          <span className="font-semibold tracking-tight">ZeroSheet</span>
-          <span className="hidden text-xs text-muted-foreground sm:inline">
-            private sheets
-          </span>
-        </a>
+    <header className="container mx-auto border-b bg-background">
+      <div className="flex min-h-20 items-center justify-between gap-4 px-6 pb-4 pt-5 sm:px-10">
+        {navigate ? (
+          <WorkspaceLink
+            href="/home"
+            navigate={navigate}
+            className="text-lg font-semibold"
+            aria-label="ZeroSheet home"
+          >
+            ZeroSheet
+          </WorkspaceLink>
+        ) : (
+          <a
+            href="/"
+            className="text-lg font-semibold"
+            aria-label="ZeroSheet home"
+          >
+            ZeroSheet
+          </a>
+        )}
 
         <div className="flex items-center gap-2">
           <ModeToggle />
@@ -61,7 +69,7 @@ export function AppHeader({
                   size="icon"
                   aria-label={`Open account menu for ${user.displayName}`}
                 >
-                  <Avatar>
+                  <Avatar className="h-9 w-9 rounded-full">
                     <AvatarFallback>{initials(user)}</AvatarFallback>
                   </Avatar>
                 </Button>

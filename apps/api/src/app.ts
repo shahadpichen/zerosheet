@@ -20,6 +20,8 @@ import { registerLifecycleRoutes } from "./lifecycle/routes.js";
 import type { LifecycleApplicationService } from "./lifecycle/types.js";
 import { registerProductRoutes } from "./product/routes.js";
 import type { ProductApplicationService } from "./product/types.js";
+import { registerWorkspaceRoutes } from "./workspace/routes.js";
+import type { WorkspaceService } from "./workspace/service.js";
 
 export interface BuildAppOptions {
   authService: AuthApplicationService;
@@ -29,6 +31,7 @@ export interface BuildAppOptions {
   auditService: AuditApplicationService;
   googleStorageService: GoogleStorageApplicationService;
   workbookSecurityService: WorkbookSecurityApplicationService;
+  workspaceService?: WorkspaceService;
   config: RuntimeConfig;
   logger?: boolean;
 }
@@ -100,6 +103,21 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
 
   // Cookie parsing must run before authentication handlers read request.cookies.
   void app.register(cookie);
+
+  // Runtime always provides this service. Keeping the composition optional lets
+  // focused legacy boundary tests build only the services they exercise.
+  if (options.workspaceService) {
+    const service = options.workspaceService;
+    void app.register((scope, _options, done) => {
+      registerWorkspaceRoutes(scope, {
+        service,
+        auth: options.authService,
+        cookieName: options.config.authCookies.sessionName,
+        webOrigin: options.config.webUrl.origin,
+      });
+      done();
+    });
+  }
 
   app.get("/health", () => {
     return HealthResponseSchema.parse({
@@ -178,9 +196,10 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   });
 
   /**
-   * Delegated Google storage is a separate OAuth surface from Google sign-in.
-   * Its plugin owns a different transaction cookie and never receives a
-   * identity token, recovery phrase, workbook key, or cell payload.
+   * This plugin serves storage status/tokens and the exceptional reconnect
+   * flow. Normal login now connects storage directly. Reconnect still owns a
+   * different transaction cookie and receives no identity token, recovery
+   * phrase, workbook key, or cell payload.
    */
   void app.register((googleStorageScope, _pluginOptions, done) => {
     registerGoogleStorageRoutes(googleStorageScope, {

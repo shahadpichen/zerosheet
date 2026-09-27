@@ -88,9 +88,11 @@ assert_cross_database_connection_is_denied "$ZEROSHEET_DB_USER" "$ZEROSHEET_DB_P
 
 assert_cross_database_connection_is_denied "$OPENFGA_DB_USER" "$OPENFGA_DB_PASSWORD" "$ZEROSHEET_DB_NAME"
 
-if [[ "$GOOGLE_OIDC_CLIENT_ID" == replace-with-* ]] ||
-  [[ "$GOOGLE_OIDC_CLIENT_SECRET" == replace-with-* ]]; then
-  echo "Google sign-in still contains placeholder OAuth credentials." >&2
+if [[ -z "${GOOGLE_OAUTH_CLIENT_ID:-}" ]] ||
+  [[ "${GOOGLE_OAUTH_CLIENT_ID:-}" == replace-with-* ]] ||
+  [[ -z "${GOOGLE_OAUTH_CLIENT_SECRET:-}${GOOGLE_OAUTH_CLIENT_SECRET_FILE:-}" ]] ||
+  [[ "${GOOGLE_OAUTH_CLIENT_SECRET:-}" == replace-with-* ]]; then
+  echo "Configure the shared GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET (or its _FILE source) before verification." >&2
   exit 1
 fi
 

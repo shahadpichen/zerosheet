@@ -150,6 +150,37 @@ if grep --quiet 'kc_idp_hint' "${verification_directory}/login.headers"; then
   exit 1
 fi
 
+# A valid-looking Google URL may still target a deleted/stale client. Compare
+# the live request with the one configured client and actual API base; never
+# print the authorization URL, whose state/nonce belong to a login transaction.
+node --input-type=module - "${verification_directory}/login.headers" "${api_base_url}" <<'NODE'
+import { readFileSync } from "node:fs";
+const headers = readFileSync(process.argv[2], "utf8");
+const location = headers.match(/^location:\s*(.+)$/im)?.[1]?.trim();
+if (!location) throw new Error("Missing Google authorization redirect");
+const url = new URL(location);
+const callback = `${process.argv[3].replace(/\/$/, "")}/auth/callback`;
+if (url.searchParams.get("client_id") !== process.env.GOOGLE_OAUTH_CLIENT_ID ||
+    url.searchParams.get("redirect_uri") !== callback ||
+    url.searchParams.has("client_secret")) {
+  throw new Error("Google redirect does not match the shared client and callback configuration");
+}
+const storageEnabled = process.env.GOOGLE_STORAGE_OAUTH_ENABLED === "true";
+const scopes = url.searchParams.get("scope")?.split(" ").sort();
+const expectedScopes = ["openid", "email", "profile", ...(storageEnabled ? [
+  "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/drive.appdata",
+] : [])].sort();
+if (JSON.stringify(scopes) !== JSON.stringify(expectedScopes) ||
+    url.searchParams.get("prompt") !== (storageEnabled ? "select_account consent" : "select_account") ||
+    (storageEnabled && (url.searchParams.get("access_type") !== "offline" ||
+      url.searchParams.get("include_granted_scopes") !== "true"))) {
+  throw new Error("Login consent parameters do not match the storage-enabled configuration");
+}
+console.log("PASS: login uses the configured shared Google client and exact callback, without exposing its secret.");
+console.log(storageEnabled ? "PASS: one login requests identity plus offline Drive access." : "PASS: the storage-disabled lab requests identity only.");
+NODE
+
 # The request hint improves account selection, but the API independently checks
 # the signed `hd` claim after callback before it creates a product session.
 if [[ -n "${GOOGLE_OIDC_HOSTED_DOMAIN:-}" ]] &&

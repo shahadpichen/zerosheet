@@ -1,6 +1,10 @@
 import { z } from "zod";
-import type { GoogleStorageOAuthConfig } from "../config.js";
+import type {
+  GoogleOAuthClientConfig,
+  GoogleStorageOAuthConfig,
+} from "../config.js";
 import { GoogleStorageDependencyError } from "./errors.js";
+import { GOOGLE_STORAGE_SCOPES } from "./consent.js";
 import type {
   GoogleOAuthTokenResult,
   GoogleStorageOAuthGateway,
@@ -10,10 +14,6 @@ const GOOGLE_AUTHORIZATION_ENDPOINT =
   "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const GOOGLE_REVOCATION_ENDPOINT = "https://oauth2.googleapis.com/revoke";
-const GOOGLE_REQUIRED_SCOPES = [
-  "https://www.googleapis.com/auth/drive.file",
-  "https://www.googleapis.com/auth/drive.appdata",
-] as const;
 const MAX_TOKEN_RESPONSE_BYTES = 64 * 1024;
 
 const GoogleTokenResponseSchema = z
@@ -26,40 +26,31 @@ const GoogleTokenResponseSchema = z
   })
   .passthrough();
 
-type EnabledGoogleStorageConfig = Extract<
-  GoogleStorageOAuthConfig,
-  { enabled: true }
->;
-type GoogleOAuthEndpointConfig = Pick<
-  EnabledGoogleStorageConfig,
-  "callbackUrl" | "clientId" | "clientSecret"
->;
-
 /**
  * This adapter talks only to Google's fixed OAuth endpoints. It deliberately
- * does not request identity claims: Google OIDC already authenticated the person,
- * while this independent grant authorizes Drive and Sheets storage actions.
+ * handles storage-only reconnects for existing sessions, using the login client.
+ * Incremental consent may return previously granted identity scopes too; these
+ * tokens must never replace the validated OIDC login or product session.
  */
 export class GoogleWebServerOAuthGateway implements GoogleStorageOAuthGateway {
-  readonly #config: GoogleOAuthEndpointConfig;
+  readonly #client: GoogleOAuthClientConfig;
+  readonly #callbackUrl: URL;
   readonly #fetch: typeof fetch;
   readonly #timeoutMs: number;
 
   public constructor(
-    config: GoogleOAuthEndpointConfig,
+    googleClient: GoogleOAuthClientConfig,
+    settings: Pick<GoogleStorageOAuthConfig, "callbackUrl">,
     options: {
       readonly fetch?: typeof fetch;
       readonly timeoutMs?: number;
     } = {},
   ) {
-    // Copy only OAuth endpoint settings. The runtime config also contains the
-    // independent refresh-token encryption key, which this network adapter has
-    // no reason to retain or access.
-    this.#config = {
-      callbackUrl: new URL(config.callbackUrl),
-      clientId: config.clientId,
-      clientSecret: config.clientSecret,
-    };
+    // Both adapters receive the same credential object from the composition
+    // root. Retain only the storage callback, never the token-encryption key:
+    // a network adapter has no reason to open database token envelopes.
+    this.#client = googleClient;
+    this.#callbackUrl = new URL(settings.callbackUrl);
     this.#fetch = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.#timeoutMs = options.timeoutMs ?? 10_000;
   }
@@ -72,10 +63,10 @@ export class GoogleWebServerOAuthGateway implements GoogleStorageOAuthGateway {
     assertOpaqueValue(input.codeChallenge, 43, 128);
     const url = new URL(GOOGLE_AUTHORIZATION_ENDPOINT);
     url.search = new URLSearchParams({
-      client_id: this.#config.clientId,
-      redirect_uri: this.#config.callbackUrl.href,
+      client_id: this.#client.clientId,
+      redirect_uri: this.#callbackUrl.href,
       response_type: "code",
-      scope: GOOGLE_REQUIRED_SCOPES.join(" "),
+      scope: GOOGLE_STORAGE_SCOPES.join(" "),
       access_type: "offline",
       include_granted_scopes: "true",
       // Explicit consent makes reconnect reliable after ZeroSheet has deleted
@@ -96,9 +87,9 @@ export class GoogleWebServerOAuthGateway implements GoogleStorageOAuthGateway {
     assertOpaqueValue(input.codeVerifier, 43, 128);
     const token = await this.tokenRequest(
       new URLSearchParams({
-        client_id: this.#config.clientId,
-        client_secret: this.#config.clientSecret,
-        redirect_uri: this.#config.callbackUrl.href,
+        client_id: this.#client.clientId,
+        client_secret: this.#client.clientSecret,
+        redirect_uri: this.#callbackUrl.href,
         grant_type: "authorization_code",
         code: input.code,
         code_verifier: input.codeVerifier,
@@ -110,7 +101,7 @@ export class GoogleWebServerOAuthGateway implements GoogleStorageOAuthGateway {
     // can reject any partial or unexpectedly changed grant.
     return token.grantedScopes
       ? token
-      : { ...token, grantedScopes: [...GOOGLE_REQUIRED_SCOPES] };
+      : { ...token, grantedScopes: [...GOOGLE_STORAGE_SCOPES] };
   }
 
   public async refreshAccessToken(
@@ -119,8 +110,8 @@ export class GoogleWebServerOAuthGateway implements GoogleStorageOAuthGateway {
     assertOpaqueValue(refreshToken, 1, 8_192);
     return this.tokenRequest(
       new URLSearchParams({
-        client_id: this.#config.clientId,
-        client_secret: this.#config.clientSecret,
+        client_id: this.#client.clientId,
+        client_secret: this.#client.clientSecret,
         grant_type: "refresh_token",
         refresh_token: refreshToken,
       }),

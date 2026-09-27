@@ -19,8 +19,10 @@ It uses authorization code flow with state, nonce, and PKCE S256, validates the
 ID token through `openid-client`, maps `(issuer, subject)` to a product UUID,
 and gives the browser only an opaque HttpOnly session.
 
-Google identity scopes remain separate from the second OAuth client used for
-Drive/Sheets access. Application roles remain product authorization data:
+Google identity and Drive/Sheets scopes are requested together when storage is
+enabled (see ADRs 0009 and 0010). Reconnect retains its own callback and
+transaction validation. Application roles remain product
+authorization data:
 
 - PostgreSQL owns lifecycle and organization metadata.
 - OpenFGA owns relationship roles and resource permissions.

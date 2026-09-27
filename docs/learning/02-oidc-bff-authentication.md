@@ -73,12 +73,12 @@ later account-governance flow.
 
 Google returns an access token and ID token during the server-to-server code
 exchange. `openid-client` verifies the ID token and ZeroSheet extracts only the
-stable subject and basic profile. This flow has no Google API to call, so the
-tokens are discarded rather than stored without a purpose.
-
-Google Drive authorization will later use a separate connection and encrypted
-token-storage design. Google login and permission to operate on Google Drive are
-related user experiences but separate OAuth grants and trust decisions.
+stable subject and basic profile. In a storage-disabled lab, tokens are discarded.
+With storage enabled, that same exchange also supplies the Drive grant. The
+storage service encrypts the refresh token and caches the short-lived access
+token before a product session is created. Neither is spread into the identity
+record or login response. See ADR 0010 for the combined onboarding sequence.
+Identity and file permissions remain different checks, even within one flow.
 
 ## Fixed HTTPS issuer
 

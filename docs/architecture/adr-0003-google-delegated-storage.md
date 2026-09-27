@@ -2,14 +2,15 @@
 
 - Status: Accepted
 - Date: 2026-09-03
+- Amended by: ADR 0009 (one client) and ADR 0010 (combined onboarding)
 
 ## Decision
 
-Use a second Google OAuth web-server client for Drive and Sheets authorization.
-It is separate from the Google OIDC client used for sign-in. Ask
-only for `drive.file` and `drive.appdata`, use authorization code flow with
-PKCE, and require the already authenticated ZeroSheet product session throughout
-the callback.
+Use the same Google OAuth web-server client as sign-in. With storage enabled,
+request `drive.file` and `drive.appdata` alongside identity scopes at login.
+Persist encrypted storage authority before issuing a session. An existing
+session may use the reconnect flow, which requires that same product session
+throughout its PKCE-bound callback.
 
 The BFF encrypts the durable Google refresh token with an independent
 AES-256-GCM deployment key before storing it in PostgreSQL. It returns only a
@@ -23,9 +24,12 @@ never contains the recovery phrase or an opened private key.
 
 ## Why
 
-- Authentication and storage authority have different purposes and revocation
-  lifecycles. A user may sign in through Google without granting Drive access,
-  or disconnect Drive without deleting their identity.
+- Authentication and storage authority have different application purposes.
+  Combined onboarding requires both; a storage-disabled IAM lab can still use
+  identity-only login. Disconnect does not delete the product identity.
+  Google consent/revocation is project-wide,
+  however: disconnect can also revoke previously granted identity scopes.
+  The existing ZeroSheet session remains local; future login may ask for consent.
 - Direct browser-to-Google writes preserve the plaintext boundary: the VPS
   does not proxy decrypted cell values.
 - `drive.file` limits the client to files it creates or the user explicitly
