@@ -395,6 +395,13 @@ class FakeGoogleStorageService implements GoogleStorageApplicationService {
 class FakeWorkbookSecurityService implements WorkbookSecurityApplicationService {
   public registeredInput: RegisterEncryptionIdentityInput | undefined;
 
+  public lookupRecipient() {
+    return Promise.reject(new ProductForbiddenError());
+  }
+  public sharingDetails() {
+    return Promise.reject(new ProductForbiddenError());
+  }
+
   public registerIdentity(
     _actor: AuthenticatedUser,
     input: RegisterEncryptionIdentityInput,
@@ -1215,6 +1222,73 @@ describe("ZeroSheet delegated Google storage boundary", () => {
 });
 
 describe("ZeroSheet encrypted workbook boundary", () => {
+  it("protects sharing metadata and exact recipient lookup with sessions, origins, and policy", async () => {
+    const setup = makeApp();
+    apps.push(setup.app);
+    const url = `/workbooks/${setup.productService.workbook.id}/secure-shares`;
+    expect((await setup.app.inject({ method: "GET", url })).statusCode).toBe(
+      401,
+    );
+    expect(
+      (
+        await setup.app.inject({
+          method: "POST",
+          url: `${url}/lookup`,
+          headers: { origin: "http://localhost:5173" },
+          payload: { email: "recipient@example.com" },
+        })
+      ).statusCode,
+    ).toBe(401);
+    setup.service.user = testUser;
+    const cookies = { zerosheet_session: "opaque-browser-session" };
+    const headers = { origin: "http://localhost:5173" };
+    expect(
+      (await setup.app.inject({ method: "GET", url, cookies })).statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await setup.app.inject({
+          method: "POST",
+          url: `${url}/lookup`,
+          cookies,
+          headers,
+          payload: { email: "not-an-email" },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await setup.app.inject({
+          method: "POST",
+          url: `${url}/lookup`,
+          cookies,
+          headers,
+          payload: {
+            email: "recipient@example.com",
+            privateKey: "not-accepted",
+          },
+        })
+      ).statusCode,
+    ).toBe(400);
+    const crossOrigin = await setup.app.inject({
+      method: "POST",
+      url: `${url}/lookup`,
+      cookies,
+      headers: { origin: "https://untrusted.example" },
+      payload: { email: "recipient@example.com" },
+    });
+    expect(crossOrigin.statusCode).toBe(403);
+    expect(crossOrigin.json()).toMatchObject({ error: "forbidden_origin" });
+    const denied = await setup.app.inject({
+      method: "POST",
+      url: `${url}/lookup`,
+      cookies,
+      headers,
+      payload: { email: "recipient@example.com" },
+    });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.headers["cache-control"]).toBe("no-store");
+  });
   const publicKey = {
     formatVersion: 1 as const,
     keyVersion: 1,
@@ -1248,6 +1322,7 @@ describe("ZeroSheet encrypted workbook boundary", () => {
     const response = await setup.app.inject({
       method: "POST",
       url: "/encryption/identities",
+      headers: { origin: "http://localhost:5173" },
       cookies: { zerosheet_session: "opaque-browser-session" },
       payload: { publicKey, encryptedPrivateKeyBackup },
     });
@@ -1268,6 +1343,7 @@ describe("ZeroSheet encrypted workbook boundary", () => {
     const response = await setup.app.inject({
       method: "PUT",
       url: `/workbooks/${setup.productService.workbook.id}/secure-shares/users/22222222-2222-4222-8222-222222222222`,
+      headers: { origin: "http://localhost:5173" },
       cookies: { zerosheet_session: "opaque-browser-session" },
       payload: { role: "viewer" },
     });

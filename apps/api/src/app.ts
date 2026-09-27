@@ -224,6 +224,7 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
       authentication: options.authService,
       security: options.workbookSecurityService,
       cookies: options.config.authCookies,
+      webOrigin: options.config.webUrl.origin,
     });
     done();
   });

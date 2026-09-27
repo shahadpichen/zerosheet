@@ -161,6 +161,25 @@ export class GoogleWorkspaceStorage {
     }
   }
 
+  /** Change only an existing user's reader/writer role. Ownership transfers
+   * and domain/group changes are intentionally outside the sharing UI. */
+  public async updateUserPermission(input: {
+    readonly spreadsheetId: string;
+    readonly permissionId: string;
+    readonly role: "reader" | "writer";
+  }): Promise<void> {
+    assertGoogleResourceId(input.spreadsheetId);
+    assertGoogleResourceId(input.permissionId);
+    await this.request.send({
+      api: "drive",
+      path: `/drive/v3/files/${encodeURIComponent(input.spreadsheetId)}/permissions/${encodeURIComponent(input.permissionId)}`,
+      method: "PATCH",
+      query: new URLSearchParams({ fields: "id", supportsAllDrives: "true" }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: input.role }),
+    });
+  }
+
   /**
    * List a bounded snapshot of live Drive permissions for explicit owner
    * review. The result is never sent to ZeroSheet automatically: unknown

@@ -23,9 +23,13 @@ import "@univerjs/preset-sheets-core/lib/index.css";
 export function EncryptedSheetEditor({
   workbook,
   onDirtyChange,
+  onBusyChange,
+  interactionBlocked = false,
 }: {
   workbook: LoadedWorkbook;
   onDirtyChange: (dirty: boolean) => void;
+  onBusyChange?: (busy: boolean) => void;
+  interactionBlocked?: boolean;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const api = useRef<FUniver | null>(null);
@@ -41,6 +45,8 @@ export function EncryptedSheetEditor({
   const [error, setError] = useState("");
   const { resolvedTheme } = useTheme();
   const initialTheme = useRef(resolvedTheme);
+  const blocked = useRef(interactionBlocked);
+  blocked.current = interactionBlocked;
   const rows = workbook.range.endRow + 1;
   const columns = workbook.range.endColumn + 1;
 
@@ -51,6 +57,17 @@ export function EncryptedSheetEditor({
   useEffect(() => {
     theme.current?.setDarkMode(resolvedTheme === "dark");
   }, [resolvedTheme]);
+  useEffect(() => {
+    // Sharing/rotation uses the persisted snapshot. Freeze edits while the
+    // modal is open, including keyboard shortcuts reaching the background.
+    api.current
+      ?.getActiveWorkbook()
+      ?.setEditable(workbook.canEdit && !interactionBlocked);
+  }, [interactionBlocked, workbook.canEdit]);
+  useEffect(() => {
+    onBusyChange?.(busy);
+    return () => onBusyChange?.(false);
+  }, [busy, onBusyChange]);
   useEffect(() => {
     if (!container.current) return;
     active.current = true;
@@ -98,7 +115,7 @@ export function EncryptedSheetEditor({
         },
       },
     });
-    sheet.setEditable(workbook.canEdit);
+    sheet.setEditable(workbook.canEdit && !blocked.current);
     const markDirty = () => {
       revision.current += 1;
       setDirty(true);
@@ -150,7 +167,7 @@ export function EncryptedSheetEditor({
   }, [workbook, rows, columns]);
 
   function protect(mode: "selection" | "columns" | "remove") {
-    if (!workbook.canEdit || saving.current) return;
+    if (!workbook.canEdit || saving.current || blocked.current) return;
     const selection = api.current
       ?.getActiveWorkbook()
       ?.getActiveSheet()
@@ -181,7 +198,8 @@ export function EncryptedSheetEditor({
 
   async function save() {
     const editor = api.current?.getActiveWorkbook();
-    if (!editor || !workbook.canEdit || saving.current) return;
+    if (!editor || !workbook.canEdit || saving.current || blocked.current)
+      return;
     saving.current = true;
     setBusy(true);
     setError("");

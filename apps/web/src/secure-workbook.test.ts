@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { WorkbookSharingDetails } from "@zerosheet/contracts";
 
 const cryptoMocks = vi.hoisted(() => ({
   openUserPrivateKeyBackup: vi.fn(),
@@ -10,6 +11,7 @@ const googleMocks = vi.hoisted(() => ({
   createUserPermission: vi.fn(),
   deletePermission: vi.fn(),
   listPermissions: vi.fn(),
+  updateUserPermission: vi.fn(),
 }));
 
 // The coordinator test deliberately replaces cryptographic primitives with
@@ -29,6 +31,7 @@ vi.mock("./google-storage.js", () => ({
     createUserPermission: googleMocks.createUserPermission,
     deletePermission: googleMocks.deletePermission,
     listPermissions: googleMocks.listPermissions,
+    updateUserPermission: googleMocks.updateUserPermission,
   },
 }));
 
@@ -77,12 +80,158 @@ const recipientEnvelope = {
   ciphertext: "F".repeat(64),
 };
 
+beforeEach(() => {
+  vi.resetAllMocks();
+  googleMocks.listPermissions.mockResolvedValue([]);
+  cryptoMocks.openUserPrivateKeyBackup.mockResolvedValue({});
+  cryptoMocks.openWorkbookKeyEnvelope.mockResolvedValue(new Uint8Array(32));
+  cryptoMocks.sealWorkbookKeyForRecipient.mockResolvedValue(recipientEnvelope);
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
 describe("secure workbook sharing coordinator", () => {
+  const existingShare: WorkbookSharingDetails["shares"][number] = {
+    userId: RECIPIENT_ID,
+    email: "recipient@example.test",
+    role: "viewer",
+    state: "active",
+    googlePermissionId: "permission_13",
+    hasEnvelope: true,
+  };
+
+  it("updates a managed Google role without allocating or deleting a permission", async () => {
+    googleMocks.listPermissions.mockResolvedValue([
+      {
+        id: "permission_13",
+        emailAddress: existingShare.email,
+        type: "user",
+        role: "reader",
+        deleted: false,
+      },
+    ]);
+    installApi({ secureShareStatus: 200, shares: [existingShare] });
+    await shareEncryptedWorkbookWithUser({
+      workbookId: WORKBOOK_ID,
+      recipientUserId: RECIPIENT_ID,
+      role: "editor",
+      recoveryPhrase: "fixture",
+    });
+    expect(googleMocks.updateUserPermission).toHaveBeenCalledWith({
+      spreadsheetId: "google_sheet_13",
+      permissionId: "permission_13",
+      role: "writer",
+    });
+    expect(googleMocks.createUserPermission).not.toHaveBeenCalled();
+    expect(googleMocks.deletePermission).not.toHaveBeenCalled();
+  });
+
+  it("never adopts or deletes an unmanaged pre-existing permission", async () => {
+    googleMocks.listPermissions.mockResolvedValue([
+      {
+        id: "external_permission",
+        emailAddress: existingShare.email,
+        type: "user",
+        role: "reader",
+        deleted: false,
+      },
+    ]);
+    installApi({ secureShareStatus: 200 });
+    await expect(
+      shareEncryptedWorkbookWithUser({
+        workbookId: WORKBOOK_ID,
+        recipientUserId: RECIPIENT_ID,
+        role: "viewer",
+        recoveryPhrase: "fixture",
+      }),
+    ).rejects.toMatchObject({ code: "GOOGLE_EXISTING_PERMISSION" });
+    expect(googleMocks.createUserPermission).not.toHaveBeenCalled();
+    expect(googleMocks.deletePermission).not.toHaveBeenCalled();
+  });
+
+  it("requires another review if the public key changes after email lookup", async () => {
+    installApi({ secureShareStatus: 200 });
+    await expect(
+      shareEncryptedWorkbookWithUser({
+        workbookId: WORKBOOK_ID,
+        recipientUserId: RECIPIENT_ID,
+        role: "viewer",
+        recoveryPhrase: "fixture",
+        reviewedRecipient: {
+          email: existingShare.email,
+          fingerprint: "old-fingerprint",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "RECIPIENT_CHANGED" });
+    expect(cryptoMocks.openWorkbookKeyEnvelope).not.toHaveBeenCalled();
+    expect(googleMocks.createUserPermission).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Google grant when the successful API response is lost", async () => {
+    googleMocks.createUserPermission.mockResolvedValue({ id: "permission_13" });
+    installApi({ secureShareStatus: 503, confirmedShares: [existingShare] });
+    await expect(
+      shareEncryptedWorkbookWithUser({
+        workbookId: WORKBOOK_ID,
+        recipientUserId: RECIPIENT_ID,
+        role: "viewer",
+        recoveryPhrase: "fixture",
+      }),
+    ).resolves.toMatchObject({ role: "viewer" });
+    expect(googleMocks.deletePermission).not.toHaveBeenCalled();
+  });
+
+  it("does not guess a rollback while a relationship is pending", async () => {
+    googleMocks.createUserPermission.mockResolvedValue({ id: "permission_13" });
+    installApi({
+      secureShareStatus: 503,
+      confirmedShares: [{ ...existingShare, state: "pending" }],
+    });
+    await expect(
+      shareEncryptedWorkbookWithUser({
+        workbookId: WORKBOOK_ID,
+        recipientUserId: RECIPIENT_ID,
+        role: "viewer",
+        recoveryPhrase: "fixture",
+      }),
+    ).rejects.toMatchObject({ code: "SHARING_REQUIRES_REVIEW" });
+    expect(googleMocks.deletePermission).not.toHaveBeenCalled();
+  });
+
+  it("restores a previous role rather than deleting its permission on failure", async () => {
+    googleMocks.listPermissions.mockResolvedValue([
+      {
+        id: "permission_13",
+        emailAddress: existingShare.email,
+        type: "user",
+        role: "reader",
+        deleted: false,
+      },
+    ]);
+    installApi({ secureShareStatus: 503, shares: [existingShare] });
+    await expect(
+      shareEncryptedWorkbookWithUser({
+        workbookId: WORKBOOK_ID,
+        recipientUserId: RECIPIENT_ID,
+        role: "editor",
+        recoveryPhrase: "fixture",
+      }),
+    ).rejects.toMatchObject({ code: "ZEROSHEET_API_FAILED" });
+    expect(googleMocks.updateUserPermission).toHaveBeenNthCalledWith(1, {
+      spreadsheetId: "google_sheet_13",
+      permissionId: "permission_13",
+      role: "writer",
+    });
+    expect(googleMocks.updateUserPermission).toHaveBeenNthCalledWith(2, {
+      spreadsheetId: "google_sheet_13",
+      permissionId: "permission_13",
+      role: "reader",
+    });
+    expect(googleMocks.deletePermission).not.toHaveBeenCalled();
+  });
   it("recovers after reload, seals the active key, and clears raw bytes", async () => {
     const rawWorkbookKey = Uint8Array.from({ length: 32 }, (_, index) => index);
     let bytesObservedBySeal: number[] | undefined;
@@ -202,7 +351,12 @@ describe("secure workbook sharing coordinator", () => {
  * call order keeps the test stable even though safe independent lookups run in
  * parallel before the browser opens the workbook key.
  */
-function installApi(input: { readonly secureShareStatus: number }): void {
+function installApi(input: {
+  readonly secureShareStatus: number;
+  shares?: WorkbookSharingDetails["shares"];
+  confirmedShares?: WorkbookSharingDetails["shares"];
+}): void {
+  let shared = false;
   vi.stubGlobal(
     "fetch",
     vi.fn((request: string | URL | Request, init?: RequestInit) => {
@@ -212,6 +366,20 @@ function installApi(input: { readonly secureShareStatus: number }): void {
           : request instanceof URL
             ? request.href
             : request.url;
+      if (path.endsWith(`/workbooks/${WORKBOOK_ID}/secure-shares`)) {
+        return Promise.resolve(
+          jsonResponse({
+            workbookId: WORKBOOK_ID,
+            googleSpreadsheetId: "google_sheet_13",
+            activeKeyVersion: 7,
+            owner: { userId: OWNER_ID, email: "owner@example.test" },
+            rotation: null,
+            shares: shared
+              ? (input.confirmedShares ?? input.shares ?? [])
+              : (input.shares ?? []),
+          }),
+        );
+      }
       if (path.endsWith(`/encryption/recipients/${RECIPIENT_ID}/key`)) {
         return Promise.resolve(
           jsonResponse({
@@ -231,6 +399,7 @@ function installApi(input: { readonly secureShareStatus: number }): void {
             activeKeyVersion: 7,
             envelope: ownerEnvelope,
             pendingRotation: null,
+            rotationPending: false,
           }),
         );
       }
@@ -269,6 +438,7 @@ function installApi(input: { readonly secureShareStatus: number }): void {
         ) &&
         init?.method === "PUT"
       ) {
+        shared = true;
         return Promise.resolve(
           jsonResponse(
             {

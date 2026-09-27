@@ -149,6 +149,21 @@ class FakeRepository implements WorkbookSecurityRepository {
   public access: WorkbookEncryptionAccessResponse | null = null;
   public identity: EncryptionIdentityResponse | null = null;
   public recipient: RecipientEncryptionKeyResponse | null = null;
+  public findRecipientByEmail() {
+    this.calls.push("lookup-email");
+    return Promise.resolve(this.recipient);
+  }
+  public sharingDetails() {
+    this.calls.push("sharing-details");
+    return Promise.resolve({
+      workbookId,
+      googleSpreadsheetId: "spreadsheet_test",
+      activeKeyVersion: 1,
+      owner: { userId: actor.id, email: "owner@example.com" },
+      rotation: null,
+      shares: [],
+    });
+  }
   public assertReady(): Promise<void> {
     return Promise.resolve();
   }
@@ -249,6 +264,37 @@ function setup() {
 }
 
 describe("WorkbookSecurityService", () => {
+  it("authorizes sharing metadata and exact email lookup before accessing the directory", async () => {
+    const { service, repository, decisions } = setup();
+    decisions.allowed = false;
+    await expect(
+      service.lookupRecipient(actor, workbookId, "recipient@example.com"),
+    ).rejects.toBeInstanceOf(ProductForbiddenError);
+    await expect(
+      service.sharingDetails(actor, workbookId),
+    ).rejects.toBeInstanceOf(ProductForbiddenError);
+    expect(repository.calls).toEqual([]);
+    decisions.allowed = true;
+    await expect(
+      service.lookupRecipient(actor, workbookId, "unknown@example.com"),
+    ).rejects.toBeInstanceOf(ProductNotFoundError);
+    repository.recipient = {
+      userId: recipientId,
+      email: "recipient@example.com",
+      publicKey: publicKey(),
+    };
+    await expect(
+      service.lookupRecipient(actor, workbookId, "recipient@example.com"),
+    ).resolves.toEqual(repository.recipient);
+    await expect(
+      service.sharingDetails(actor, workbookId),
+    ).resolves.toMatchObject({ owner: { userId: actor.id }, shares: [] });
+    expect(
+      decisions.checks.every(
+        (check) => check.permission === "can_manage_sharing",
+      ),
+    ).toBe(true);
+  });
   it("validates and registers only the acting user's encrypted identity", async () => {
     const { service, repository } = setup();
     const key = publicKey();

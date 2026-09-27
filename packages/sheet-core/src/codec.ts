@@ -54,6 +54,9 @@ export async function decodeGoogleRange(input: {
   readonly context: SheetCipherContext;
   readonly range: GridRange;
   readonly values: readonly (readonly GoogleCellScalar[])[];
+  /** Only explicit rotation recovery supplies extra versions. Ordinary editor
+   * loads remain pinned to their one active version and reject stale markers. */
+  readonly recoveryKeys?: ReadonlyMap<number, CryptoKey>;
 }): Promise<DecodedSheetRange> {
   assertMatrixShape(input.range, input.values);
   const protection = new CellProtectionMap();
@@ -71,19 +74,23 @@ export async function decodeGoogleRange(input: {
         const coordinate = coordinateLabel(row, column);
         try {
           const header = inspectEncryptedCell(value);
-          if (header.keyVersion !== input.context.keyVersion) {
+          const key =
+            header.keyVersion === input.context.keyVersion
+              ? input.context.key
+              : input.recoveryKeys?.get(header.keyVersion);
+          if (!key) {
             throw new SheetCoreError("SHEET_CORRUPT_CIPHERTEXT", {
               coordinate,
             });
           }
           const plaintext = await decryptCell(
-            input.context.key,
+            key,
             {
               workbookId: input.context.workbookId,
               sheetId: input.context.sheetId,
               row,
               column,
-              keyVersion: input.context.keyVersion,
+              keyVersion: header.keyVersion,
             },
             value,
           );

@@ -1,6 +1,7 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import type { WorkspaceWorkbook } from "@zerosheet/contracts";
-import { ArrowLeft, LoaderCircle } from "lucide-react";
+import { ArrowLeft, LoaderCircle, Share2 } from "lucide-react";
+import { WorkbookSharingDialog } from "./components/workbook-sharing-dialog.js";
 import { Button } from "./components/ui/button.js";
 import type { RecoverySession } from "./WorkbookHome.js";
 import {
@@ -11,6 +12,7 @@ import {
 import {
   initializeEncryptedWorkbook,
   recoverEncryptionIdentity,
+  SecureWorkbookClientError,
 } from "./secure-workbook.js";
 import {
   openSavedWorkbook,
@@ -43,6 +45,16 @@ export function WorkbookPage({
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [retry, setRetry] = useState(0);
+  const [sharing, setSharing] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [sharingBusy, setSharingBusy] = useState(false);
+  const [sharingChanged, setSharingChanged] = useState(false);
+  const editorDirty = useCallback((value: boolean) => setDirty(value), []);
+  useEffect(() => {
+    onDirtyChange(dirty || sharingBusy);
+    return () => onDirtyChange(false);
+  }, [dirty, sharingBusy, onDirtyChange]);
   useEffect(() => {
     let active = true;
     setFile(null);
@@ -105,15 +117,55 @@ export function WorkbookPage({
         <ArrowLeft />
         Workbooks
       </Button>
-      <h1 className="truncate text-2xl tracking-tight">
-        {file?.name ?? "Workbook"}
-      </h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="truncate text-2xl tracking-tight">
+          {file?.name ?? "Workbook"}
+        </h1>
+        {file?.ready && file.canShare && (
+          <div className="flex items-center gap-3">
+            {dirty && (
+              <span className="text-xs text-muted-foreground">
+                Save changes before sharing
+              </span>
+            )}
+            <Button
+              disabled={busy || dirty || saving}
+              onClick={() => setSharing(true)}
+            >
+              <Share2 /> Share
+            </Button>
+          </div>
+        )}
+      </div>
+      {sharing && file && (
+        <WorkbookSharingDialog
+          workbookId={id}
+          name={file.name}
+          recovery={recovery}
+          onBusyChange={setSharingBusy}
+          onChanged={() => setSharingChanged(true)}
+          onClose={() => {
+            setSharing(false);
+            // Permissions themselves advance Google file versions. Reopen the
+            // saved sheet after any mutation rather than keep a stale sync base.
+            if (sharingChanged) {
+              setLoaded(null);
+              setRetry((value) => value + 1);
+              setSharingChanged(false);
+            }
+          }}
+        />
+      )}
       {error !== null && (
         <div
           role="alert"
           className="my-6 space-y-3 border border-destructive p-4 text-sm"
         >
-          <p>{workspaceError(error)}</p>
+          <p>
+            {error instanceof SecureWorkbookClientError
+              ? error.message
+              : workspaceError(error)}
+          </p>
           <Button variant="outline" onClick={() => setRetry(retry + 1)}>
             Retry loading
           </Button>
@@ -153,7 +205,12 @@ export function WorkbookPage({
         <Suspense
           fallback={<p className="py-8 text-sm">Loading spreadsheet editor…</p>}
         >
-          <Editor workbook={loaded} onDirtyChange={onDirtyChange} />
+          <Editor
+            workbook={loaded}
+            onDirtyChange={editorDirty}
+            onBusyChange={setSaving}
+            interactionBlocked={sharing}
+          />
         </Suspense>
       )}
     </main>

@@ -2,6 +2,15 @@ import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  createUserEncryptionIdentity,
+  generateRecoveryPhrase,
+  openWorkbookKeyEnvelope,
+  openUserPrivateKeyBackup,
+  importWorkbookKey,
+  decryptCell,
+  encryptCell,
+} from "../../packages/crypto/dist/index.js";
 
 // Run the real React/Univer/crypto code in a clean browser. Only the API and
 // Google transport are fixtures: no personal account, consent, or Drive writes.
@@ -32,6 +41,24 @@ const organization = {
 };
 const workbookId = "b1000000-0000-4000-8000-000000000003";
 const fileId = "spreadsheet-browser-fixture";
+// Independent recipient material proves the owner never shares their phrase
+// or private key. These are generated fixtures, never a real user's secrets.
+const recipient = {
+  id: "b1000000-0000-4000-8000-000000000004",
+  email: "recipient@example.invalid",
+  displayName: "Recipient Test",
+};
+const recipientPhrase = generateRecoveryPhrase();
+const recipientIdentity = await createUserEncryptionIdentity({
+  recoveryPhrase: recipientPhrase,
+  keyVersion: 1,
+});
+let recipientEnvelope;
+let shares = [];
+let permissions = [];
+let rotation = null;
+let rotationStages = 0;
+let failNextDelete = false;
 let identity, workbook, encryption;
 const folders = [];
 let workspaceReads = 0;
@@ -52,15 +79,26 @@ const json = (route, body, status = 200) =>
     body: JSON.stringify(body),
   });
 
-await page.route(`${base}/api/**`, async (route) => {
+async function apiFixture(route, actor = user) {
   const request = route.request();
   const path = new URL(request.url()).pathname.replace(/^\/api/u, "");
   const method = request.method();
-  if (path === "/auth/me") return json(route, { authenticated: true, user });
+  const isOwner = actor.id === user.id;
+  const role = shares.find((share) => share.userId === actor.id)?.role;
+  const visible = workbook && (isOwner || role);
+  const projected = visible
+    ? {
+        ...workbook,
+        canShare: isOwner,
+        canEdit: isOwner ? workbook.canEdit : role === "editor",
+      }
+    : null;
+  if (path === "/auth/me")
+    return json(route, { authenticated: true, user: actor });
   if (path === "/workspace") {
     workspaceReads += 1;
     return json(route, {
-      workbooks: workbook ? [workbook] : [],
+      workbooks: projected ? [projected] : [],
       folders,
       organizations: [organization],
       nextCursor: null,
@@ -82,11 +120,117 @@ await page.route(`${base}/api/**`, async (route) => {
     return route.fulfill({ status: 204 });
   }
   if (path === `/workspace/workbooks/${workbookId}`)
-    return json(route, workbook);
+    return json(
+      route,
+      projected ?? { error: "forbidden" },
+      projected ? 200 : 403,
+    );
+  if (path === `/workbooks/${workbookId}/secure-shares`)
+    return json(route, {
+      workbookId,
+      googleSpreadsheetId: fileId,
+      activeKeyVersion: encryption.activeKeyVersion,
+      owner: { userId: user.id, email: user.email },
+      shares,
+      rotation,
+    });
+  if (path === `/workbooks/${workbookId}/secure-shares/lookup`) {
+    return json(
+      route,
+      request.postDataJSON().email === recipient.email
+        ? {
+            userId: recipient.id,
+            email: recipient.email,
+            publicKey: recipientIdentity.publicKey,
+          }
+        : { error: "not_found" },
+      request.postDataJSON().email === recipient.email ? 200 : 404,
+    );
+  }
+  if (path.endsWith(`/encryption/recipients/${recipient.id}/key`))
+    return json(route, {
+      userId: recipient.id,
+      email: recipient.email,
+      publicKey: recipientIdentity.publicKey,
+    });
+  if (
+    path.endsWith(`/secure-shares/users/${recipient.id}`) &&
+    method === "PUT"
+  ) {
+    const input = request.postDataJSON();
+    recipientEnvelope = input.recipientEnvelope;
+    shares = [
+      {
+        userId: recipient.id,
+        email: recipient.email,
+        role: input.role,
+        state: "active",
+        hasEnvelope: true,
+        googlePermissionId: input.googlePermissionId,
+      },
+    ];
+    return json(route, {
+      workbookId,
+      principal: { type: "user", id: recipient.id },
+      role: input.role,
+    });
+  }
+  if (path.endsWith(`/encryption/rotations/revoke/${recipient.id}/plan`))
+    return json(route, {
+      workbookId,
+      fromKeyVersion: encryption.activeKeyVersion,
+      toKeyVersion: encryption.activeKeyVersion + 1,
+      revokedUserId: recipient.id,
+      rotationState: rotation ? "pending" : "new",
+      googlePermissionId: "recipient_permission",
+      remainingRecipients: [
+        { userId: user.id, email: user.email, publicKey: identity.publicKey },
+      ],
+    });
+  if (path.endsWith("/encryption/rotations") && method === "POST") {
+    assert.equal(
+      rotation,
+      null,
+      "A retry must recover the persisted key, not restage another",
+    );
+    rotationStages += 1;
+    const input = request.postDataJSON();
+    rotation = {
+      workbookId,
+      fromKeyVersion: encryption.activeKeyVersion,
+      toKeyVersion: input.toKeyVersion,
+      revokedUserId: recipient.id,
+      state: "pending",
+    };
+    encryption.pendingRotation = {
+      toKeyVersion: input.toKeyVersion,
+      envelope: input.remainingRecipientEnvelopes[0].envelope,
+    };
+    encryption.rotationPending = true;
+    return json(route, rotation, 201);
+  }
+  if (path.endsWith("/encryption/rotations/2/commit")) {
+    encryption.activeKeyVersion = 2;
+    encryption.envelope = encryption.pendingRotation.envelope;
+    encryption.pendingRotation = null;
+    encryption.rotationPending = false;
+    const completed = { ...rotation, state: "committed" };
+    shares = [];
+    rotation = null;
+    return json(route, completed);
+  }
   if (
     path === "/encryption/identities/me" ||
     path === "/encryption/identities/me/1"
   ) {
+    if (!isOwner)
+      return json(route, {
+        userId: recipient.id,
+        publicKey: recipientIdentity.publicKey,
+        encryptedPrivateKeyBackup: Buffer.from(
+          recipientIdentity.encryptedPrivateKeyBackup,
+        ).toString("base64url"),
+      });
     if (failIdentityLookup) return json(route, { error: "unavailable" }, 503);
     return json(route, identity ?? { error: "conflict" }, identity ? 200 : 409);
   }
@@ -125,6 +269,7 @@ await page.route(`${base}/api/**`, async (route) => {
         activeKeyVersion: 1,
         envelope: input.creatorEnvelope,
         pendingRotation: null,
+        rotationPending: false,
       };
       workbook.ready = true;
       return json(
@@ -133,7 +278,13 @@ await page.route(`${base}/api/**`, async (route) => {
         201,
       );
     }
-    return json(route, encryption);
+    if (!isOwner && !role) return json(route, { error: "forbidden" }, 403);
+    return json(
+      route,
+      isOwner
+        ? encryption
+        : { ...encryption, envelope: recipientEnvelope, pendingRotation: null },
+    );
   }
   if (path === "/google/storage/access-token")
     return json(route, {
@@ -141,70 +292,101 @@ await page.route(`${base}/api/**`, async (route) => {
       expiresAt: new Date(Date.now() + 3600000).toISOString(),
     });
   throw new Error(`Unexpected fixture API operation: ${method} ${path}`);
-});
-await page.route(
-  /^https:\/\/(www|sheets)\.googleapis\.com\//u,
-  async (route) => {
-    const request = route.request(),
-      url = new URL(request.url());
-    if (url.searchParams.get("spaces") === "appDataFolder")
-      return json(route, { files: [] });
-    if (url.pathname.startsWith("/upload/"))
-      return json(route, { id: "fixture-encrypted-backup", version: "1" });
-    if (url.pathname.startsWith("/drive/v3/files"))
-      return json(route, {
-        id: fileId,
-        name: "Budget",
-        mimeType: "application/vnd.google-apps.spreadsheet",
-        version: String(version),
-        modifiedTime: new Date().toISOString(),
-        webViewLink: `https://docs.google.com/spreadsheets/d/${fileId}/edit`,
-      });
-    if (url.pathname.endsWith("/values:batchGet")) {
-      if (readFailure === "expired")
-        return json(route, { error: "fixture_expired" }, 401);
-      if (readFailure === "unavailable")
-        return json(route, { error: "fixture_unavailable" }, 503);
-      if (readFailure === "malformed")
-        return json(route, {
-          valueRanges: [{ range: "Sheet1!A1:Z100", values: null }],
-        });
-      return json(route, {
-        // Real Google responses omit `values` for a new, empty spreadsheet.
-        // Keeping that shape here prevents the browser fixture from masking a
-        // parser bug that would break the very first workbook opening.
-        valueRanges: [
-          {
-            range: "Sheet1!A1:Z100",
-            majorDimension: "ROWS",
-            ...(values.length ? { values } : {}),
-          },
-        ],
-      });
-    }
-    if (url.pathname.endsWith("/values:batchUpdate")) {
-      if (failNextWrite) {
-        failNextWrite = false;
+}
+async function googleFixture(route) {
+  const request = route.request(),
+    url = new URL(request.url());
+  if (url.searchParams.get("spaces") === "appDataFolder")
+    return json(route, { files: [] });
+  if (url.pathname.startsWith("/upload/"))
+    return json(route, { id: "fixture-encrypted-backup", version: "1" });
+  if (url.pathname.includes("/permissions")) {
+    if (request.method() === "GET") return json(route, { permissions });
+    if (request.method() === "DELETE") {
+      if (failNextDelete) {
+        failNextDelete = false;
         return json(route, { error: "fixture_unavailable" }, 503);
       }
-      values = request.postDataJSON().data[0].values;
+      permissions = [];
       version += 1;
-      googleWrites += 1;
-      return json(route, { totalUpdatedCells: 2600 });
+      return route.fulfill({ status: 204 });
     }
+    const input = request.postDataJSON();
+    permissions = [
+      {
+        id: "recipient_permission",
+        type: "user",
+        emailAddress: recipient.email,
+        role: input.role,
+        deleted: false,
+      },
+    ];
+    version += 1;
+    return json(route, { id: "recipient_permission" });
+  }
+  if (url.pathname.startsWith("/drive/v3/files"))
     return json(route, {
-      sheets: [
+      id: fileId,
+      name: "Budget",
+      mimeType: "application/vnd.google-apps.spreadsheet",
+      version: String(version),
+      modifiedTime: new Date().toISOString(),
+      webViewLink: `https://docs.google.com/spreadsheets/d/${fileId}/edit`,
+    });
+  if (url.pathname.endsWith("/values:batchGet")) {
+    if (readFailure === "expired")
+      return json(route, { error: "fixture_expired" }, 401);
+    if (readFailure === "unavailable")
+      return json(route, { error: "fixture_unavailable" }, 503);
+    if (readFailure === "malformed")
+      return json(route, {
+        valueRanges: [{ range: "Sheet1!A1:Z100", values: null }],
+      });
+    return json(route, {
+      // Real Google responses omit `values` for a new, empty spreadsheet.
+      // Keeping that shape here prevents the browser fixture from masking a
+      // parser bug that would break the very first workbook opening.
+      valueRanges: [
         {
-          properties: {
-            sheetId: 0,
-            title: "Sheet1",
-            gridProperties: { rowCount: 1000, columnCount: 26 },
-          },
+          range: "Sheet1!A1:Z100",
+          majorDimension: "ROWS",
+          ...(values.length
+            ? {
+                values: url.searchParams
+                  .getAll("ranges")
+                  .some((range) => range.includes("!"))
+                  ? values.slice(0, 100).map((row) => row.slice(0, 26))
+                  : values,
+              }
+            : {}),
         },
       ],
     });
-  },
-);
+  }
+  if (url.pathname.endsWith("/values:batchUpdate")) {
+    if (failNextWrite) {
+      failNextWrite = false;
+      return json(route, { error: "fixture_unavailable" }, 503);
+    }
+    values = request.postDataJSON().data[0].values;
+    version += 1;
+    googleWrites += 1;
+    return json(route, { totalUpdatedCells: 2600 });
+  }
+  return json(route, {
+    sheets: [
+      {
+        properties: {
+          sheetId: 0,
+          title: "Sheet1",
+          gridProperties: { rowCount: 1000, columnCount: 26 },
+        },
+      },
+    ],
+  });
+}
+await page.route(`${base}/api/**`, (route) => apiFixture(route));
+await page.route(/^https:\/\/(www|sheets)\.googleapis\.com\//u, googleFixture);
 
 try {
   await page.goto(base);
@@ -648,9 +830,251 @@ try {
     1,
     "Recovery/locking must never replace the key",
   );
+
+  // Share from the real owner dialog, then open the same ciphertext in a
+  // separate browser context with only the recipient's own phrase/private key.
+  await page.getByLabel("Recovery phrase", { exact: true }).fill(phrase);
+  await page
+    .getByRole("button", { name: "Recover and continue", exact: true })
+    .click();
+  await page.getByRole("link", { name: "Projects", exact: true }).click();
+  await page.getByRole("link", { name: /Budget/u }).click();
+  await page.locator(".univer-container canvas:visible").first().waitFor();
+  await page.getByRole("button", { name: "Share", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog
+    .getByLabel("Google email address", { exact: true })
+    .fill("absent@example.invalid");
+  await dialog
+    .getByRole("button", { name: "Review access", exact: true })
+    .click();
+  await dialog
+    .getByRole("alert")
+    .filter({ hasText: "No unambiguous" })
+    .waitFor();
+  await dialog
+    .getByLabel("Google email address", { exact: true })
+    .fill(recipient.email);
+  await dialog
+    .getByRole("button", { name: "Review access", exact: true })
+    .click();
+  await dialog
+    .getByRole("heading", { name: "Review before sharing", exact: true })
+    .waitFor();
+  await page.screenshot({
+    path: join(artifacts, "sharing-review-mobile-dark.png"),
+    fullPage: true,
+  });
+  assert.equal(
+    await page.evaluate(
+      () =>
+        globalThis.document.documentElement.scrollWidth <=
+        globalThis.innerWidth,
+    ),
+    true,
+  );
+  await dialog
+    .getByRole("button", { name: "Confirm access", exact: true })
+    .click();
+  await dialog.getByText(/Access saved for/u).waitFor();
+  assert.equal(shares[0].role, "viewer");
+  assert.equal(permissions[0].role, "reader");
+  const oldBytes = await openWorkbookKeyEnvelope({
+    workbookId,
+    envelope: recipientEnvelope,
+    recipientPublicKey: recipientIdentity.publicKey,
+    recipientPrivateKey: recipientIdentity.privateKey,
+  });
+  const oldKey = await importWorkbookKey(oldBytes);
+  oldBytes.fill(0);
+  const cellContext = {
+    workbookId,
+    sheetId: "0",
+    row: 0,
+    column: 0,
+    keyVersion: 1,
+  };
+  assert.deepEqual(await decryptCell(oldKey, cellContext, values[0][0]), {
+    kind: "string",
+    value: "private-value",
+  });
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await page.locator(".univer-container canvas:visible").first().waitFor();
+
+  const recipientContext = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+  });
+  const recipientPage = await recipientContext.newPage();
+  recipientPage.on("pageerror", (error) => failures.push(error.message));
+  await recipientPage.route(`${base}/api/**`, (route) =>
+    apiFixture(route, recipient),
+  );
+  await recipientPage.route(
+    /^https:\/\/(www|sheets)\.googleapis\.com\//u,
+    async (route) => {
+      // The fixture enforces the provider role too, so a broken disabled button
+      // cannot accidentally make this test pass by writing as a viewer.
+      if (!shares.length) return json(route, { error: "forbidden" }, 403);
+      if (route.request().method() !== "GET" && shares[0].role !== "editor")
+        return json(route, { error: "forbidden" }, 403);
+      return googleFixture(route);
+    },
+  );
+  async function openRecipient() {
+    await recipientPage.goto(`${base}/workbooks/${workbookId}`);
+    await recipientPage
+      .getByLabel("Recovery phrase", { exact: true })
+      .fill(recipientPhrase);
+    await recipientPage
+      .getByRole("button", { name: "Recover and continue", exact: true })
+      .click();
+    await recipientPage
+      .locator(".univer-container canvas:visible")
+      .first()
+      .waitFor();
+  }
+  await openRecipient();
+  await recipientPage.getByText("View only", { exact: true }).waitFor();
+  assert.equal(
+    await recipientPage
+      .getByRole("button", { name: "Share", exact: true })
+      .count(),
+    0,
+  );
+  assert.equal(
+    await recipientPage
+      .getByRole("button", { name: "Save", exact: true })
+      .isDisabled(),
+    true,
+  );
+  await recipientPage.getByText("1 protected cells", { exact: true }).waitFor();
+  await recipientPage.screenshot({
+    path: join(artifacts, "sharing-recipient-viewer.png"),
+    fullPage: true,
+  });
+
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page
+    .getByRole("button", { name: "Switch to light theme", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Share", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Change access", exact: true })
+    .click();
+  await dialog
+    .getByLabel("Recipient access", { exact: true })
+    .selectOption("editor");
+  await page.screenshot({
+    path: join(artifacts, "sharing-review-light.png"),
+    fullPage: true,
+  });
+  await dialog
+    .getByRole("button", { name: "Confirm access", exact: true })
+    .click();
+  await dialog.getByText(/Access saved for/u).waitFor();
+  assert.equal(shares[0].role, "editor");
+  assert.equal(permissions[0].role, "writer");
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await openRecipient();
+  await recipientPage
+    .locator(".univer-container")
+    .click({ position: { x: 85, y: 32 } });
+  await recipientPage.keyboard.type("collaborator-edit");
+  await recipientPage.keyboard.press("Enter");
+  await recipientPage
+    .getByRole("button", { name: "Save", exact: true })
+    .click();
+  await recipientPage
+    .getByText("Saved to Google Drive", { exact: true })
+    .waitFor();
+  assert.deepEqual(await decryptCell(oldKey, cellContext, values[0][0]), {
+    kind: "string",
+    value: "collaborator-edit",
+  });
+
+  // Include a protected value beyond the editor viewport. Removal must rotate
+  // the complete saved tab, and resume must decode its already-rekeyed cells.
+  values[100] = [
+    await encryptCell(
+      oldKey,
+      { ...cellContext, row: 100 },
+      { kind: "string", value: "outside-viewport" },
+    ),
+  ];
+  version += 1;
+  await page.getByRole("button", { name: "Share", exact: true }).click();
+  await dialog.getByRole("button", { name: "Remove", exact: true }).click();
+  failNextDelete = true;
+  await dialog
+    .getByRole("button", { name: "Remove access and rotate key", exact: true })
+    .click();
+  await dialog
+    .getByRole("heading", { name: "Finish removing access", exact: true })
+    .waitFor();
+  assert.equal(encryption.activeKeyVersion, 1);
+  assert.ok(values[0][0].startsWith("zs1:2:"));
+  const pendingEnvelope = encryption.pendingRotation.envelope;
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await page
+    .getByRole("alert")
+    .filter({ hasText: "Access removal is unfinished" })
+    .waitFor();
+  await page.getByRole("button", { name: "Share", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Resume removal", exact: true })
+    .click();
+  await dialog
+    .getByRole("button", { name: "Remove access and rotate key", exact: true })
+    .click();
+  await dialog.getByText(/Access removed\. Remaining/u).waitFor();
+  assert.equal(rotationStages, 1);
+  assert.deepEqual(encryption.envelope, pendingEnvelope);
+  assert.equal(shares.length, 0);
+  assert.equal(permissions.length, 0);
+  assert.equal(encryption.activeKeyVersion, 2);
+  const ownerPrivate = await openUserPrivateKeyBackup({
+    recoveryPhrase: phrase,
+    publicKey: identity.publicKey,
+    encryptedPrivateKeyBackup: new Uint8Array(
+      Buffer.from(identity.encryptedPrivateKeyBackup, "base64url"),
+    ),
+  });
+  const newBytes = await openWorkbookKeyEnvelope({
+    workbookId,
+    envelope: encryption.envelope,
+    recipientPublicKey: identity.publicKey,
+    recipientPrivateKey: ownerPrivate,
+  });
+  const newKey = await importWorkbookKey(newBytes);
+  newBytes.fill(0);
+  assert.deepEqual(
+    await decryptCell(newKey, { ...cellContext, keyVersion: 2 }, values[0][0]),
+    { kind: "string", value: "collaborator-edit" },
+  );
+  assert.deepEqual(
+    await decryptCell(
+      newKey,
+      { ...cellContext, keyVersion: 2, row: 100 },
+      values[100][0],
+    ),
+    { kind: "string", value: "outside-viewport" },
+  );
+  await assert.rejects(
+    decryptCell(oldKey, { ...cellContext, keyVersion: 2 }, values[0][0]),
+  );
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await page.locator(".univer-container canvas:visible").first().waitFor();
+  await recipientPage
+    .getByRole("button", { name: "Save", exact: true })
+    .click();
+  await recipientPage
+    .getByRole("alert")
+    .filter({ hasText: "no longer have access" })
+    .waitFor();
+  await recipientContext.close();
   assert.deepEqual(failures, []);
   console.log(
-    `PASS: Home hub, folder creation/move/breadcrumbs, grid/table/search/sort, retained editor return, shared inbox, create shortcut, encryption/save/reopen, failed loads/saves, recovery, and desktop/mobile themes. Screenshots: ${artifacts}`,
+    `PASS: Home/folder UI, save/reopen/recovery, desktop/mobile themes; two-account viewer/editor sharing, recipient decryption/edit, removal, interrupted rekey resume, outside-viewport rekey, and revoked-save denial. Screenshots: ${artifacts}`,
   );
 } catch (error) {
   await page.screenshot({

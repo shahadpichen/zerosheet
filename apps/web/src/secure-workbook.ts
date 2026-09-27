@@ -7,6 +7,7 @@ import {
   WorkbookRotationResponseSchema,
   WorkbookShareResponseSchema,
   WorkbookSharingAuditExpectationResponseSchema,
+  WorkbookSharingDetailsSchema,
   type UserPublicEncryptionKey,
   type WorkbookKeyEnvelope,
   type WorkbookRotationPlanResponse,
@@ -44,7 +45,11 @@ export class SecureWorkbookClientError extends Error {
       | "ZEROSHEET_API_FAILED"
       | "GOOGLE_PERMISSION_ROLLBACK_FAILED"
       | "GOOGLE_SHEET_CONFLICT"
-      | "ROTATION_ALREADY_PENDING",
+      | "ROTATION_ALREADY_PENDING"
+      | "RECIPIENT_CHANGED"
+      | "SHARING_REQUIRES_REVIEW"
+      | "ROTATION_TOO_LARGE"
+      | "GOOGLE_EXISTING_PERMISSION",
   ) {
     super(
       code === "GOOGLE_PERMISSION_ROLLBACK_FAILED"
@@ -52,8 +57,16 @@ export class SecureWorkbookClientError extends Error {
         : code === "GOOGLE_SHEET_CONFLICT"
           ? "The Google Sheet changed during key rotation. Reload before retrying."
           : code === "ROTATION_ALREADY_PENDING"
-            ? "A staged workbook-key rotation must be recovered and resumed instead of generating another key."
-            : "The ZeroSheet security service rejected the operation.",
+            ? "Access removal is unfinished. The owner can open Share and choose Resume removal. Editing stays paused until it finishes."
+            : code === "RECIPIENT_CHANGED"
+              ? "The recipient's key changed. Look up the address again and review the new fingerprint."
+              : code === "GOOGLE_EXISTING_PERMISSION"
+                ? "This address already has unmanaged Google access. Review its existing Google permission before sharing through ZeroSheet. Nothing was changed."
+                : code === "ROTATION_TOO_LARGE"
+                  ? "This sheet exceeds the current 10,000-cell removal limit. No key rotation was started. Keep the share until a larger-sheet rotation is supported."
+                  : code === "SHARING_REQUIRES_REVIEW"
+                    ? "Sharing is not confirmed. Refresh the access list and review Google permissions before retrying; no uncertain permission was automatically removed."
+                    : "The ZeroSheet security service rejected the operation.",
     );
     this.name = "SecureWorkbookClientError";
   }
@@ -147,6 +160,7 @@ export async function recoverWorkbookEncryptionAccess(input: {
   readonly spreadsheetId: string;
   readonly sheetId: string;
   readonly sheetTitle: string;
+  readonly rotationPending: boolean;
   readonly active: { readonly keyVersion: number; readonly key: CryptoKey };
   readonly pending: {
     readonly keyVersion: number;
@@ -177,6 +191,7 @@ export async function recoverWorkbookEncryptionAccess(input: {
     spreadsheetId: access.googleSpreadsheetId,
     sheetId: String(access.googleSheetId),
     sheetTitle: access.googleSheetTitle,
+    rotationPending: access.rotationPending,
     active: { keyVersion: access.activeKeyVersion, key: activeKey },
     pending,
   };
@@ -253,12 +268,18 @@ export async function shareEncryptedWorkbookWithUser(input: {
   readonly recipientUserId: string;
   readonly role: "editor" | "viewer";
   readonly recoveryPhrase: string;
+  /** The UI confirms this exact address and fingerprint. Refetching the key is
+   * necessary, but silently using a changed key after review would be unsafe. */
+  readonly reviewedRecipient?: {
+    readonly email: string;
+    readonly fingerprint: string;
+  };
 }) {
   // A non-extractable CryptoKey is excellent for cell encryption but cannot be
   // fed into HPKE after a reload. Recover the active envelope only inside this
   // operation, seal its bytes to the recipient, and clear them before making
   // the Google/API mutations. The caller never has to retain an extractable key.
-  const [recipient, access] = await Promise.all([
+  const [recipient, access, sharing] = await Promise.all([
     apiJson(
       `/api/workbooks/${input.workbookId}/encryption/recipients/${input.recipientUserId}/key`,
       { method: "GET" },
@@ -269,7 +290,58 @@ export async function shareEncryptedWorkbookWithUser(input: {
       { method: "GET" },
       WorkbookEncryptionAccessResponseSchema,
     ),
+    apiJson(
+      `/api/workbooks/${input.workbookId}/secure-shares`,
+      { method: "GET" },
+      WorkbookSharingDetailsSchema,
+    ),
   ]);
+  if (sharing.rotation || access.rotationPending || access.pendingRotation)
+    throw new SecureWorkbookClientError("ROTATION_ALREADY_PENDING");
+  if (sharing.owner.userId === input.recipientUserId)
+    throw new SecureWorkbookClientError("ZEROSHEET_API_FAILED");
+  if (
+    input.reviewedRecipient &&
+    (recipient.email.toLowerCase() !==
+      input.reviewedRecipient.email.toLowerCase() ||
+      recipient.publicKey.fingerprint !== input.reviewedRecipient.fingerprint)
+  )
+    throw new SecureWorkbookClientError("RECIPIENT_CHANGED");
+  const previous = sharing.shares.find(
+    (share) => share.userId === input.recipientUserId,
+  );
+  if (
+    previous &&
+    (previous.state !== "active" ||
+      !previous.googlePermissionId ||
+      !previous.hasEnvelope)
+  )
+    throw new SecureWorkbookClientError("SHARING_REQUIRES_REVIEW");
+
+  // A Google permission ID identifies a person, not a newly-created grant.
+  // Never "roll back" an existing unmanaged permission as though we own it.
+  const permissions = await googleWorkspaceStorage.listPermissions(
+    access.googleSpreadsheetId,
+  );
+  const matching = permissions.filter(
+    (permission) =>
+      !permission.deleted &&
+      permission.emailAddress?.toLowerCase() === recipient.email.toLowerCase(),
+  );
+  const existing = previous
+    ? matching.find(
+        (permission) => permission.id === previous.googlePermissionId,
+      )
+    : undefined;
+  if (
+    previous &&
+    (!existing ||
+      existing.type !== "user" ||
+      existing.role !== (previous.role === "editor" ? "writer" : "reader"))
+  )
+    throw new SecureWorkbookClientError("SHARING_REQUIRES_REVIEW");
+  if (!previous && matching.length)
+    throw new SecureWorkbookClientError("GOOGLE_EXISTING_PERMISSION");
   const rawWorkbookKey = await openEnvelopeBytesWithRecoveryPhrase(
     input.workbookId,
     access.envelope,
@@ -286,11 +358,20 @@ export async function shareEncryptedWorkbookWithUser(input: {
   } finally {
     rawWorkbookKey.fill(0);
   }
-  const permission = await googleWorkspaceStorage.createUserPermission({
-    spreadsheetId: access.googleSpreadsheetId,
-    email: recipient.email,
-    role: input.role === "editor" ? "writer" : "reader",
-  });
+  const permission = previous
+    ? { id: previous.googlePermissionId! }
+    : await googleWorkspaceStorage.createUserPermission({
+        spreadsheetId: access.googleSpreadsheetId,
+        email: recipient.email,
+        role: input.role === "editor" ? "writer" : "reader",
+      });
+  if (previous && previous.role !== input.role) {
+    await googleWorkspaceStorage.updateUserPermission({
+      spreadsheetId: access.googleSpreadsheetId,
+      permissionId: permission.id,
+      role: input.role === "editor" ? "writer" : "reader",
+    });
+  }
 
   try {
     return await apiJson(
@@ -306,11 +387,51 @@ export async function shareEncryptedWorkbookWithUser(input: {
       WorkbookShareResponseSchema,
     );
   } catch (error) {
+    // A lost HTTP response may hide a committed share. Read the authoritative
+    // state before compensation; removing its Google grant would break access.
+    const current = await apiJson(
+      `/api/workbooks/${input.workbookId}/secure-shares`,
+      { method: "GET" },
+      WorkbookSharingDetailsSchema,
+    ).catch(() => {
+      throw new SecureWorkbookClientError("SHARING_REQUIRES_REVIEW");
+    });
+    const confirmed = current.shares.find(
+      (share) => share.userId === input.recipientUserId,
+    );
+    if (
+      confirmed?.state === "active" &&
+      confirmed.role === input.role &&
+      confirmed.googlePermissionId === permission.id &&
+      confirmed.hasEnvelope
+    ) {
+      return {
+        workbookId: input.workbookId,
+        principal: { type: "user" as const, id: input.recipientUserId },
+        role: input.role,
+      };
+    }
+    if (
+      current.rotation ||
+      (previous && !confirmed) ||
+      confirmed?.state === "pending" ||
+      confirmed?.state === "pending_delete" ||
+      (confirmed && (!previous || confirmed.role !== previous.role))
+    )
+      throw new SecureWorkbookClientError("SHARING_REQUIRES_REVIEW");
     try {
-      await googleWorkspaceStorage.deletePermission(
-        access.googleSpreadsheetId,
-        permission.id,
-      );
+      if (previous) {
+        await googleWorkspaceStorage.updateUserPermission({
+          spreadsheetId: access.googleSpreadsheetId,
+          permissionId: permission.id,
+          role: previous.role === "editor" ? "writer" : "reader",
+        });
+      } else {
+        await googleWorkspaceStorage.deletePermission(
+          access.googleSpreadsheetId,
+          permission.id,
+        );
+      }
     } catch {
       throw new SecureWorkbookClientError("GOOGLE_PERMISSION_ROLLBACK_FAILED");
     }
@@ -386,6 +507,9 @@ interface RotationContentInput {
   readonly range: GridRange;
   readonly cells: readonly (readonly EditorCell[])[];
   readonly protection: CellProtectionMap;
+  /** Version of the persisted snapshot being rewritten, not a new observation
+   * made only after loading potentially stale plaintext from the editor. */
+  readonly expectedDriveVersion: string;
 }
 
 /**
@@ -469,6 +593,9 @@ async function finishStagedRotation(
     const versionBefore = await googleWorkspaceStorage.getSpreadsheet(
       input.spreadsheetId,
     );
+    if (versionBefore.version !== input.expectedDriveVersion) {
+      throw new SecureWorkbookClientError("GOOGLE_SHEET_CONFLICT");
+    }
     const context: SheetCipherContext = {
       workbookId: input.workbookId,
       sheetId: input.sheetId,

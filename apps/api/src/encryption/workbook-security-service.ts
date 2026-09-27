@@ -72,6 +72,32 @@ export class WorkbookSecurityService implements WorkbookSecurityApplicationServi
     }
   }
 
+  /** Resolve only an exact, unambiguous, active account after checking the
+   * workbook permission. Unknown and not-yet-ready accounts look the same. */
+  public async lookupRecipient(
+    actor: AuthenticatedUser,
+    workbookId: string,
+    email: string,
+  ) {
+    await this.requireWorkbookPermission(
+      actor,
+      workbookId,
+      "can_manage_sharing",
+    );
+    const recipient = await this.#repository.findRecipientByEmail(email);
+    if (!recipient) throw new ProductNotFoundError();
+    return recipient;
+  }
+
+  public async sharingDetails(actor: AuthenticatedUser, workbookId: string) {
+    await this.requireWorkbookPermission(
+      actor,
+      workbookId,
+      "can_manage_sharing",
+    );
+    return this.#repository.sharingDetails(workbookId);
+  }
+
   public async ownIdentity(actor: AuthenticatedUser) {
     const identity = await this.#repository.findCurrentIdentity(actor.id);
     if (!identity) throw new EncryptionIdentityRequiredError();
@@ -156,8 +182,9 @@ export class WorkbookSecurityService implements WorkbookSecurityApplicationServi
     );
 
     // Store the recipient envelope before OpenFGA can authorize access. If the
-    // relationship write fails, the envelope by itself grants nothing and the
-    // browser rolls back the already-created Google Drive permission.
+    // relationship write fails, the browser rereads the outbox projection
+    // before considering compensation. A pending intent may still succeed,
+    // so blindly deleting its Google permission would break that future share.
     await this.#repository.storeSecureShareMaterial({
       workbookId,
       recipientUserId,

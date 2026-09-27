@@ -60,18 +60,28 @@ only raw key disappears on refresh before any recoverable envelope exists.
 owner browser
   1. GET recipient's current public key from authorized API
   2. HPKE-seal active workbook key to exact recipient/key version
-  3. create exact Google user permission and retain its permission ID
+  3. inspect Google permissions; create a new grant or update a managed role
   4. PUT role + Google permission metadata + opaque envelope to API
        -> API validates current recipient/key/envelope binding
        -> PostgreSQL saves envelope, then the durable relationship intent
        -> OpenFGA activates viewer/editor relation
-  5. on API failure, delete the permission created in step 3
+  5. on API failure, reread state before attempting any compensation
 ```
 
 The API validates the P-256 points, canonical base64url fields, algorithm suite,
 recipient ID, public-key fingerprint, and key versions. It deliberately cannot
 open the envelope. The Google address should be shown explicitly in the UI;
 the user's product email is not proof that it is the desired Google account.
+The [Share dialog](16-sharing-dialog.md) now provides this review and verifies
+that the key fingerprint has not changed between review and confirmation.
+
+A lost API response may hide a successful share. The browser first checks
+whether the requested role, permission, and envelope are active; if so, it
+preserves them. For a confirmed failed new grant, it deletes that grant. For a
+failed managed role change, it restores the old role instead of deleting the
+person's existing permission. Pending or unavailable state needs review, not
+blind rollback. A pre-existing unmanaged Google permission is not adopted or
+automatically deleted.
 
 ## Why rollback cannot be perfect
 
@@ -101,13 +111,17 @@ ZeroSheet therefore treats revocation as forward-looking key rotation:
 
 If a failure happens after step 4, the pending rotation remains. The owner's
 browser can recover the pending key from its own pending envelope and resume the
-same rewrite. The API refuses incomplete or duplicate envelope sets.
+same rewrite. The API refuses incomplete or duplicate envelope sets. Another
+stage request is rejected even if its version matches: independently generated
+keys can have the same version number. Resume reads the stored key instead.
 
 ## Current limits stated honestly
 
 - Revocation protects future workbook versions; it cannot erase retained
   plaintext, screenshots, exports, old ciphertext, or old keys.
-- The current rewrite is one rectangular range of at most 10,000 cells.
+- The current rewrite covers the registered tab's used rectangle, at most
+  10,000 cells, including values outside the editor's A1:Z100 viewport. Larger
+  rewrites fail before staging. Normal editing pauses while rotation is pending.
 - Encrypted sharing supports direct users. Team sharing is blocked until every
   member can receive an envelope and membership changes trigger rotation.
 - A narrow Google Drive version-check/write race remains because Sheets offers

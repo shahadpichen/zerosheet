@@ -33,6 +33,43 @@ beforeAll(async () => {
 });
 
 describe("selective encrypted Sheet codec", () => {
+  it("recovers mixed key versions only when explicitly provided saved recovery keys", async () => {
+    const pendingKey = await importWorkbookKey(new Uint8Array(32).fill(24));
+    const protection = new CellProtectionMap();
+    protection.protectRange(range);
+    const cells: EditorCell[][] = [
+      [{ value: "old" }, { value: "new" }, { value: null }],
+      [{ value: 1 }, { value: 2 }, { value: 3 }],
+    ];
+    const old = await encodeGoogleRange({ context, range, protection, cells });
+    const pending = await encodeGoogleRange({
+      context: { ...context, keyVersion: 2, key: pendingKey },
+      range,
+      protection,
+      cells,
+    });
+    const values = old.valueRange.values.map((row) => [...row]);
+    values[0]![1] = pending.valueRange.values[0]![1]!;
+    await expect(
+      decodeGoogleRange({ context, range, values }),
+    ).rejects.toMatchObject({ code: "SHEET_CORRUPT_CIPHERTEXT" });
+    await expect(
+      decodeGoogleRange({
+        context,
+        range,
+        values,
+        recoveryKeys: new Map([[2, pendingKey]]),
+      }),
+    ).resolves.toMatchObject({ cells });
+    await expect(
+      decodeGoogleRange({
+        context,
+        range,
+        values,
+        recoveryKeys: new Map([[3, pendingKey]]),
+      }),
+    ).rejects.toMatchObject({ code: "SHEET_CORRUPT_CIPHERTEXT" });
+  });
   it("encrypts only selected cells and persists a protected blank marker", async () => {
     const protection = new CellProtectionMap();
     protection.protectRange({

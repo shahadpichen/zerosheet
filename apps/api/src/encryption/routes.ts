@@ -17,6 +17,8 @@ import {
   WorkbookRotationResponseSchema,
   WorkbookShareParametersSchema,
   WorkbookShareResponseSchema,
+  WorkbookRecipientLookupSchema,
+  WorkbookSharingDetailsSchema,
   WorkbookSharingAuditExpectationResponseSchema,
 } from "@zerosheet/contracts";
 import type { AuthenticatedUser } from "@zerosheet/contracts";
@@ -40,6 +42,7 @@ export interface WorkbookSecurityRouteOptions {
   readonly authentication: AuthApplicationService;
   readonly security: WorkbookSecurityApplicationService;
   readonly cookies: AuthCookieConfig;
+  readonly webOrigin: string;
 }
 
 /**
@@ -51,10 +54,54 @@ export function registerWorkbookSecurityRoutes(
   app: FastifyInstance,
   options: WorkbookSecurityRouteOptions,
 ): void {
-  app.addHook("onRequest", (_request, reply, done) => {
+  app.addHook("onRequest", async (request, reply) => {
     void reply.header("Cache-Control", "no-store");
-    done();
+    // These endpoints use ambient session cookies. Require the exact frontend
+    // origin for writes, including bodyless rotation commits; CORS alone is
+    // not CSRF protection. Read-only GETs still require session + policy below.
+    if (
+      request.method !== "GET" &&
+      request.headers.origin !== options.webOrigin
+    )
+      return reply.code(403).send({ error: "forbidden_origin" });
   });
+
+  app.get("/workbooks/:workbookId/secure-shares", async (request, reply) => {
+    const actor = await authenticatedUser(request, reply, options);
+    const parameters = WorkbookParametersSchema.safeParse(request.params);
+    if (!actor) return reply;
+    if (!parameters.success) return invalidRequest(reply);
+    return execute(reply, async () =>
+      WorkbookSharingDetailsSchema.parse(
+        await options.security.sharingDetails(
+          actor,
+          parameters.data.workbookId,
+        ),
+      ),
+    );
+  });
+
+  // POST keeps recipient addresses out of URL/history/access-log query strings.
+  // This plugin's same-origin guard also protects this request.
+  app.post(
+    "/workbooks/:workbookId/secure-shares/lookup",
+    async (request, reply) => {
+      const actor = await authenticatedUser(request, reply, options);
+      const parameters = WorkbookParametersSchema.safeParse(request.params);
+      const body = WorkbookRecipientLookupSchema.safeParse(request.body);
+      if (!actor) return reply;
+      if (!parameters.success || !body.success) return invalidRequest(reply);
+      return execute(reply, async () =>
+        RecipientEncryptionKeyResponseSchema.parse(
+          await options.security.lookupRecipient(
+            actor,
+            parameters.data.workbookId,
+            body.data.email,
+          ),
+        ),
+      );
+    },
+  );
 
   app.post("/encryption/identities", async (request, reply) => {
     const actor = await authenticatedUser(request, reply, options);

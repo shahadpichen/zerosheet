@@ -8,7 +8,10 @@ import {
   createGoogleSheetSyncSession,
   googleWorkspaceStorage,
 } from "./google-storage.js";
-import { recoverWorkbookEncryptionAccess } from "./secure-workbook.js";
+import {
+  recoverWorkbookEncryptionAccess,
+  SecureWorkbookClientError,
+} from "./secure-workbook.js";
 import {
   loadWorkbook,
   workspaceRequest,
@@ -46,8 +49,8 @@ export async function openSavedWorkbook(
     workbookId: id,
     recoveryPhrase: phrase,
   });
-  if (access.pending)
-    throw new Error("Workbook key rotation must be completed before editing");
+  if (access.rotationPending || access.pending)
+    throw new SecureWorkbookClientError("ROTATION_ALREADY_PENDING");
   const tabs = await googleWorkspaceStorage.listSpreadsheetTabs(
     access.spreadsheetId,
   );
@@ -91,6 +94,10 @@ export async function assertWorkbookStillEditable(
   const access = WorkbookEncryptionAccessResponseSchema.parse(
     await workspaceRequest(`/workbooks/${workbook.id}/encryption`),
   );
-  if (access.pendingRotation || access.activeKeyVersion !== workbook.keyVersion)
+  if (
+    access.rotationPending ||
+    access.pendingRotation ||
+    access.activeKeyVersion !== workbook.keyVersion
+  )
     throw new Error("Reload required after workbook key rotation");
 }

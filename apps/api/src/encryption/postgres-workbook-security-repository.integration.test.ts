@@ -8,6 +8,7 @@ import type {
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgresWorkbookSecurityRepository } from "./postgres-workbook-security-repository.js";
+import { PostgresProductRepository } from "../product/postgres-product-repository.js";
 
 const runDatabaseIntegration =
   process.env.ZEROSHEET_RUN_DB_INTEGRATION === "true"
@@ -155,6 +156,23 @@ runDatabaseIntegration("PostgresWorkbookSecurityRepository", () => {
       creatorEnvelope: envelope(ownerKey, 1),
       now,
     });
+    await expect(
+      repository.findRecipientByEmail(
+        " RECIPIENT-INTEGRATION@zerosheet.local ",
+      ),
+    ).resolves.toMatchObject({ userId: recipientId });
+    await expect(
+      repository.findRecipientByEmail("absent@zerosheet.local"),
+    ).resolves.toBeNull();
+    await expect(
+      repository.storeSecureShareMaterial({
+        workbookId,
+        recipientUserId: ownerId,
+        googlePermissionId: "owner_permission",
+        recipientEnvelope: envelope(ownerKey, 1),
+        now,
+      }),
+    ).rejects.toThrow();
     await repository.storeSecureShareMaterial({
       workbookId,
       recipientUserId: recipientId,
@@ -191,6 +209,22 @@ runDatabaseIntegration("PostgresWorkbookSecurityRepository", () => {
     await expect(
       repository.findWorkbookAccess(workbookId, recipientId),
     ).resolves.toMatchObject({ activeKeyVersion: 1, pendingRotation: null });
+    await expect(repository.sharingDetails(workbookId)).resolves.toMatchObject({
+      owner: { userId: ownerId },
+      rotation: null,
+      shares: [{ userId: recipientId, hasEnvelope: true, state: "active" }],
+    });
+    await pool.query(
+      "UPDATE workbook_user_shares SET authorization_state = 'pending' WHERE workbook_id = $1",
+      [workbookId],
+    );
+    await expect(
+      repository.createRotationPlan(workbookId, recipientId),
+    ).rejects.toThrow();
+    await pool.query(
+      "UPDATE workbook_user_shares SET authorization_state = 'active' WHERE workbook_id = $1",
+      [workbookId],
+    );
     const plan = await repository.createRotationPlan(workbookId, recipientId);
     expect(plan).toMatchObject({
       fromKeyVersion: 1,
@@ -218,6 +252,21 @@ runDatabaseIntegration("PostgresWorkbookSecurityRepository", () => {
     await expect(
       repository.createRotationPlan(workbookId, recipientId),
     ).resolves.toMatchObject({ rotationState: "pending", toKeyVersion: 2 });
+    await expect(
+      repository.findWorkbookAccess(workbookId, recipientId),
+    ).resolves.toMatchObject({ rotationPending: true, pendingRotation: null });
+    await expect(
+      repository.stageRotation({
+        actorId: ownerId,
+        workbookId,
+        revokedUserId: recipientId,
+        toKeyVersion: 2,
+        remainingRecipientEnvelopes: [
+          { userId: ownerId, envelope: envelope(ownerKey, 2) },
+        ],
+        now,
+      }),
+    ).rejects.toThrow();
 
     await expect(
       repository.commitRotation({
@@ -230,6 +279,58 @@ runDatabaseIntegration("PostgresWorkbookSecurityRepository", () => {
     await expect(
       repository.findWorkbookAccess(workbookId, ownerId),
     ).resolves.toMatchObject({ activeKeyVersion: 2, pendingRotation: null });
+    await expect(repository.sharingDetails(workbookId)).resolves.toMatchObject({
+      rotation: { state: "committed" },
+      shares: [{ hasEnvelope: false }],
+    });
+
+    // Reuse a fixture-owned outbox ID: no live user's operation is changed.
+    await pool.query(
+      "UPDATE relationship_outbox SET status = 'pending', applied_at = NULL, writes = '[]'::jsonb, deletes = $2::jsonb WHERE id = $1",
+      [
+        shareOperationId,
+        JSON.stringify([
+          {
+            user: `user:${recipientId}`,
+            relation: "viewer",
+            object: `workbook:${workbookId}`,
+          },
+        ]),
+      ],
+    );
+    await pool.query(
+      "UPDATE workbook_user_shares SET authorization_state = 'pending_delete' WHERE workbook_id = $1",
+      [workbookId],
+    );
+    const product = new PostgresProductRepository(pool);
+    const retried = await product.removeWorkbookShare(
+      workbookId,
+      { type: "user", id: recipientId },
+      { operationId: "unused-on-retry", now },
+    );
+    expect(retried.operation?.id).toBe(shareOperationId);
+    await product.completeRelationshipOperation(shareOperationId, now);
+    await expect(repository.sharingDetails(workbookId)).resolves.toMatchObject({
+      rotation: null,
+      shares: [],
+    });
+
+    // A deliberate later re-invitation must not resurrect the old removal UI.
+    await repository.storeSecureShareMaterial({
+      workbookId,
+      recipientUserId: recipientId,
+      googlePermissionId: "reinvitated_permission",
+      recipientEnvelope: envelope(recipientKey, 2),
+      now,
+    });
+    await pool.query(
+      "INSERT INTO workbook_user_shares (workbook_id, user_id, role, authorization_state, authorization_operation_id, created_at, updated_at) VALUES ($1, $2, 'viewer', 'active', $3, $4, $4)",
+      [workbookId, recipientId, shareOperationId, now],
+    );
+    await expect(repository.sharingDetails(workbookId)).resolves.toMatchObject({
+      rotation: null,
+      shares: [{ hasEnvelope: true }],
+    });
   });
 });
 

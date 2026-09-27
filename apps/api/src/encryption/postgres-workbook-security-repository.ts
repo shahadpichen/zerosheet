@@ -7,6 +7,7 @@ import type {
   WorkbookKeyEnvelope,
   WorkbookRotationResponse,
   WorkbookRotationPlanResponse,
+  WorkbookSharingDetails,
 } from "@zerosheet/contracts";
 import type { Pool, PoolClient } from "pg";
 import {
@@ -244,6 +245,96 @@ export class PostgresWorkbookSecurityRepository implements WorkbookSecurityRepos
       : null;
   }
 
+  /** Email is a lookup hint, never the authentication identifier. Refuse an
+   * ambiguous email instead of merging separate Google identities/accounts. */
+  public async findRecipientByEmail(
+    email: string,
+  ): Promise<RecipientEncryptionKeyResponse | null> {
+    const result = await this.pool.query<{ id: string }>(
+      `SELECT id FROM product_users
+       WHERE lower(primary_email) = $1 AND account_status = 'active'
+       LIMIT 2`,
+      [email.trim().toLowerCase()],
+    );
+    return result.rows.length === 1
+      ? this.findRecipientIdentity(result.rows[0]!.id)
+      : null;
+  }
+
+  /** Show pending outbox states too. A committed rotation is retained in this
+   * response while its final relationship removal still needs a retry. */
+  public async sharingDetails(
+    workbookId: string,
+  ): Promise<WorkbookSharingDetails> {
+    const result = await this.pool.query<
+      WorkbookEncryptionRow & { owner_id: string; owner_email: string }
+    >(
+      `SELECT encryption.*, workbook.created_by AS owner_id, person.primary_email AS owner_email
+       FROM workbook_encryption encryption
+       JOIN workbooks workbook ON workbook.id = encryption.workbook_id
+       JOIN product_users person ON person.id = workbook.created_by
+       WHERE encryption.workbook_id = $1`,
+      [workbookId],
+    );
+    const row = result.rows[0];
+    if (!row) throw new ProductNotFoundError();
+    const shares = await this.pool.query<{
+      user_id: string;
+      email: string;
+      role: "viewer" | "editor";
+      state: "active" | "pending" | "pending_delete";
+      permission_id: string | null;
+      has_envelope: boolean;
+    }>(
+      `SELECT share.user_id, person.primary_email AS email, share.role,
+              share.authorization_state AS state, permission.permission_id,
+              EXISTS (SELECT 1 FROM workbook_key_envelopes envelope
+                      WHERE envelope.workbook_id = share.workbook_id
+                        AND envelope.recipient_user_id = share.user_id
+                        AND envelope.workbook_key_version = $2) AS has_envelope
+       FROM workbook_user_shares share
+       JOIN product_users person ON person.id = share.user_id
+       LEFT JOIN workbook_google_permissions permission
+         ON permission.workbook_id = share.workbook_id AND permission.user_id = share.user_id
+        AND permission.revoked_at IS NULL
+       WHERE share.workbook_id = $1 ORDER BY lower(person.primary_email) LIMIT 10000`,
+      [workbookId, row.active_key_version],
+    );
+    const rotations = await this.pool.query<RotationRow>(
+      `SELECT rotation.* FROM workbook_key_rotations rotation
+       WHERE rotation.workbook_id = $1 AND (
+         rotation.state = 'pending' OR EXISTS (
+           SELECT 1 FROM workbook_user_shares share
+           WHERE share.workbook_id = rotation.workbook_id
+             AND share.user_id = rotation.revoked_user_id
+             AND share.authorization_state = 'pending_delete'
+         ) OR (rotation.to_key_version = $2 AND EXISTS (
+           SELECT 1 FROM workbook_user_shares share
+           WHERE share.workbook_id = rotation.workbook_id AND share.user_id = rotation.revoked_user_id
+             AND NOT EXISTS (SELECT 1 FROM workbook_key_envelopes envelope
+                             WHERE envelope.workbook_id = share.workbook_id
+                               AND envelope.recipient_user_id = share.user_id
+                               AND envelope.workbook_key_version = $2)
+         ))) ORDER BY rotation.to_key_version DESC LIMIT 1`,
+      [workbookId, row.active_key_version],
+    );
+    return {
+      workbookId,
+      googleSpreadsheetId: row.google_spreadsheet_id,
+      activeKeyVersion: row.active_key_version,
+      owner: { userId: row.owner_id, email: row.owner_email },
+      rotation: rotations.rows[0] ? this.rotation(rotations.rows[0]) : null,
+      shares: shares.rows.map((share) => ({
+        userId: share.user_id,
+        email: share.email,
+        role: share.role,
+        state: share.state,
+        googlePermissionId: share.permission_id,
+        hasEnvelope: share.has_envelope,
+      })),
+    };
+  }
+
   public async initializeWorkbook(
     input: InitializeWorkbookRecordInput,
   ): Promise<WorkbookEncryptionStateResponse> {
@@ -368,6 +459,7 @@ export class PostgresWorkbookSecurityRepository implements WorkbookSecurityRepos
       googleSheetId: row.google_sheet_id,
       googleSheetTitle: row.google_sheet_title,
       activeKeyVersion: row.active_key_version,
+      rotationPending: row.rotation_state === "rotation_pending",
       envelope: active,
       pendingRotation:
         row.pending_key_version === null ||
@@ -568,6 +660,15 @@ export class PostgresWorkbookSecurityRepository implements WorkbookSecurityRepos
           "Finish the pending key rotation before changing shares.",
         );
       }
+      // Reject an owner/self-share before touching their envelope. The product
+      // layer also checks this, but it runs after this crypto transaction.
+      const target = await client.query(
+        `SELECT 1 FROM workbooks workbook JOIN product_users person ON person.id = $2
+         WHERE workbook.id = $1 AND workbook.created_by <> $2
+           AND person.account_status = 'active'`,
+        [input.workbookId, input.recipientUserId],
+      );
+      if (target.rowCount !== 1) throw new ProductConflictError();
       const recipient = await this.currentKeyForUpdate(
         client,
         input.recipientUserId,
@@ -630,15 +731,11 @@ export class PostgresWorkbookSecurityRepository implements WorkbookSecurityRepos
         [input.workbookId],
       );
       if (existing.rows[0]) {
-        const rotation = this.rotation(existing.rows[0]);
-        if (
-          rotation.toKeyVersion === input.toKeyVersion &&
-          rotation.revokedUserId === input.revokedUserId
-        ) {
-          return rotation;
-        }
+        // Matching version numbers do not imply matching random keys. A second
+        // caller must recover the saved envelopes, never write cells using its
+        // independently generated (and therefore different) unstored key.
         throw new ProductConflictError(
-          "Another workbook-key rotation is already pending.",
+          "Recover the saved pending rotation before continuing.",
         );
       }
       if (
@@ -863,11 +960,22 @@ export class PostgresWorkbookSecurityRepository implements WorkbookSecurityRepos
     client: PoolClient,
     workbookId: string,
   ): Promise<void> {
+    // A pending grant/removal changes the recipient set. Wait for its outbox
+    // operation before deciding who receives the next workbook key.
+    const unsettled = await client.query(
+      `SELECT 1 FROM workbook_user_shares
+       WHERE workbook_id = $1 AND authorization_state <> 'active' LIMIT 1`,
+      [workbookId],
+    );
+    if (unsettled.rowCount !== 0)
+      throw new ProductConflictError(
+        "Finish pending access changes before rotating keys.",
+      );
     const teamShare = await client.query(
       `
         SELECT 1
         FROM workbook_team_shares
-        WHERE workbook_id = $1 AND authorization_state = 'active'
+        WHERE workbook_id = $1
         LIMIT 1
       `,
       [workbookId],

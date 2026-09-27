@@ -38,6 +38,7 @@ interface WorkbookRow {
 interface RoleStateRow {
   role: string;
   authorization_state: "pending" | "active" | "pending_delete";
+  authorization_operation_id: string;
 }
 
 interface PendingOperationRow {
@@ -627,6 +628,29 @@ export class PostgresProductRepository implements ProductRepository {
         principal.id,
         keyColumn,
       );
+      if (existing.authorization_state === "pending_delete") {
+        // Resume this exact immutable intent after an interrupted OpenFGA
+        // call. Creating a second deletion would race the original completer.
+        // The gateway already treats a missing tuple as a successful delete.
+        const pending = await client.query<PendingOperationRow>(
+          "SELECT id, writes, deletes FROM relationship_outbox WHERE id = $1",
+          [existing.authorization_operation_id],
+        );
+        const row = pending.rows[0];
+        if (!row) throw new ProductConflictError();
+        return {
+          value: {
+            workbookId,
+            principal,
+            role: existing.role as WorkbookShareRole,
+          },
+          operation: {
+            id: row.id,
+            writes: this.parseTupleArray(row.writes),
+            deletes: this.parseTupleArray(row.deletes),
+          },
+        };
+      }
       this.requireMutableRelationship(existing);
       const role = existing.role as WorkbookShareRole;
       const operation: PendingRelationshipOperation = {
@@ -916,7 +940,7 @@ export class PostgresProductRepository implements ProductRepository {
      */
     const result = await client.query<RoleStateRow>(
       `
-        SELECT role, authorization_state
+        SELECT role, authorization_state, authorization_operation_id
         FROM ${table}
         WHERE ${resourceColumn} = $1 AND ${userColumn} = $2
         FOR UPDATE

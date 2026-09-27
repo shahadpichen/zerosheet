@@ -97,9 +97,10 @@ This storage behavior is intentionally unchanged by matching ZeroDrive's UI.
   changes, additional tabs, and persisted formatting need a later format/UI pass.
 - Normal Google files are not automatically imported. The browser lists
   ZeroSheet-registered workbooks authorized through OpenFGA **and** OPA.
-- Sharing/key-rotation coordinators already exist, but this change does not add
-  share-management dialogs or folder-sharing. Shared workbooks appear when the
-  necessary product share, Google permission, and recipient envelope exist.
+- The saved editor now has a **Share** dialog for direct viewer/editor access,
+  role changes, removal with key rotation, and copying a protected workbook
+  link. See [the sharing walkthrough](16-sharing-dialog.md). Folder/team sharing
+  is not supported. Recipients first need their own account and recovery setup.
 - Rename, trash, folder deletion, and realtime collaboration are not part of
   this increment. The UI does not show nonfunctional buttons for those actions.
 - Listing is paginated over 50 candidates, with policy checks before metadata
@@ -131,6 +132,9 @@ return paths, first-page creation/recovery, unavailable identity lookups, requir
 backup acknowledgements, lost registration responses, prevention of key
 replacement, create/protect/save, failures, reopen, reload/unlock, locking,
 empty Google responses, load retries, context-appropriate sign-in actions,
-retained editor URLs, both themes, and narrow mobile layouts. It uses a clean browser profile and does
+retained editor URLs, both themes, and narrow mobile layouts. It also exercises
+two separate accounts: recipient lookup/review, viewer access, editor upgrade,
+recipient saves, removal, interrupted rotation recovery, protected cells outside
+the editor viewport, and denial of a revoked recipient's save. It uses clean browser profiles and does
 not modify a personal Google account. Real Google consent/API access still needs
 a manual acceptance run with a disposable workbook.

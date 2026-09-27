@@ -47,6 +47,22 @@ function jsonRequestBody(init: RequestInit): string {
 }
 
 describe("GoogleWorkspaceStorage", () => {
+  it("changes only the role on the exact existing Google permission", async () => {
+    const { storage, fetchMock } = storageWithResponses(
+      Response.json({ id: "existing_permission" }),
+    );
+    await storage.updateUserPermission({
+      spreadsheetId,
+      permissionId: "existing_permission",
+      role: "writer",
+    });
+    const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    expect(url.pathname).toBe(
+      `/drive/v3/files/${spreadsheetId}/permissions/existing_permission`,
+    );
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(jsonRequestBody(init))).toEqual({ role: "writer" });
+  });
   it("creates an app-marked Google spreadsheet without sending a key", async () => {
     const { storage, fetchMock } = storageWithResponses(spreadsheetResponse());
 

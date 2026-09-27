@@ -14,6 +14,7 @@ import type {
   WorkbookRotationPlanResponse,
   WorkbookSharingAuditExpectationResponse,
   WorkbookShareResponse,
+  WorkbookSharingDetails,
 } from "@zerosheet/contracts";
 
 export interface RegisterIdentityRecordInput {
@@ -76,6 +77,10 @@ export interface WorkbookSecurityRepository {
   findRecipientIdentity(
     userId: string,
   ): Promise<RecipientEncryptionKeyResponse | null>;
+  findRecipientByEmail(
+    email: string,
+  ): Promise<RecipientEncryptionKeyResponse | null>;
+  sharingDetails(workbookId: string): Promise<WorkbookSharingDetails>;
   initializeWorkbook(
     input: InitializeWorkbookRecordInput,
   ): Promise<WorkbookEncryptionStateResponse>;
@@ -100,6 +105,15 @@ export interface WorkbookSecurityRepository {
 }
 
 export interface WorkbookSecurityApplicationService {
+  lookupRecipient(
+    actor: AuthenticatedUser,
+    workbookId: string,
+    email: string,
+  ): Promise<RecipientEncryptionKeyResponse>;
+  sharingDetails(
+    actor: AuthenticatedUser,
+    workbookId: string,
+  ): Promise<WorkbookSharingDetails>;
   registerIdentity(
     actor: AuthenticatedUser,
     input: RegisterEncryptionIdentityInput,

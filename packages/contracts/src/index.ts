@@ -264,6 +264,9 @@ export const WorkbookEncryptionAccessResponseSchema = z.object({
   googleSheetId: z.number().int().min(0),
   googleSheetTitle: z.string().min(1).max(100),
   activeKeyVersion: z.number().int().min(1),
+  // A revoked recipient deliberately has no pending envelope, but still must
+  // be told to stop editing while another browser completes the rotation.
+  rotationPending: z.boolean(),
   envelope: WorkbookKeyEnvelopeSchema,
   pendingRotation: z
     .object({
@@ -338,6 +341,40 @@ export const WorkbookSharingAuditExpectationResponseSchema = z.object({
     )
     .max(10_000),
 });
+
+/** Exact-address lookup avoids exposing a browsable user directory. A caller
+ * must already be allowed to manage this workbook before the API resolves it. */
+export const WorkbookRecipientLookupSchema = z
+  .object({
+    email: z.string().trim().toLowerCase().email().max(254),
+  })
+  .strict();
+
+/** Sharing management includes unfinished relationship operations instead of
+ * presenting a misleading "everyone is up to date" list. No private backups or
+ * workbook envelopes belong in this metadata response. */
+export const WorkbookSharingDetailsSchema = z.object({
+  workbookId: z.string().uuid(),
+  googleSpreadsheetId: z.string(),
+  activeKeyVersion: z.number().int().min(1),
+  owner: z.object({ userId: z.string().uuid(), email: z.string().email() }),
+  rotation: WorkbookRotationResponseSchema.nullable(),
+  shares: z
+    .array(
+      z.object({
+        userId: z.string().uuid(),
+        email: z.string().email(),
+        role: z.enum(["viewer", "editor"]),
+        state: z.enum(["active", "pending", "pending_delete"]),
+        googlePermissionId: z.string().nullable(),
+        hasEnvelope: z.boolean(),
+      }),
+    )
+    .max(10_000),
+});
+export type WorkbookSharingDetails = z.infer<
+  typeof WorkbookSharingDetailsSchema
+>;
 
 /**
  * Google storage status never returns a Google account token or provider user

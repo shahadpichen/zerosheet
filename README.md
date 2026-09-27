@@ -16,6 +16,8 @@ The product will combine:
 The signed-in UI now starts with a workbook browser and a dedicated saved editor.
 See [workbook browser setup and current limits](docs/learning/15-workbook-browser.md)
 for recovery setup, Google persistence, folders, testing, and the bounded editor scope.
+The saved editor's **Share** dialog supports direct viewer/editor access and
+removal with resumable key rotation. See the [sharing walkthrough and limits](docs/learning/16-sharing-dialog.md).
 
 Milestone 14 adds a bounded TypeScript record SDK, five-minute quickstart,
 encrypted CRM and backend examples, database/provider sharing-drift visibility,
